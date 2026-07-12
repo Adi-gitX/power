@@ -1,0 +1,19 @@
+{
+  "name": "power",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.6.5",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "typecheck": "tsc --build",
+    "test": "vitest run",
+    "validate": "pnpm --filter @power/agents run validate && pnpm --filter @power/knowledge run validate",
+    "check": "pnpm typecheck && pnpm validate && pnpm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
