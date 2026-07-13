@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # The deterministic gate ahead of any model-based review. Everything here
+      # is a file-existence or reference check — cheap, exact, and the class of
+      # problem an LLM reviewer is a wasteful way to catch. A missing template,
+      # a dead section reference, an unknown model id, or an unresolved
+      # placeholder fails the build rather than shipping with a warning.
+      - name: Validate agent registry and capability packs
+        run: pnpm validate
+
+      - name: Test
+        run: pnpm test
+
+      # Guards the claim the gate layer makes about itself: the golden fixtures
+      # must pass and the deliberately broken ones must fail. A gate that cannot
+      # fail is not a gate.
+      - name: Gate fixtures behave in both directions
+        run: |
+          set -e
+          cd packages/gates
+          for stage in research spec verification; do
+            pnpm exec tsx src/cli.ts "$stage" test/fixtures/golden
+          done
+          for stage in research spec verification; do
+            if pnpm exec tsx src/cli.ts "$stage" test/fixtures/broken > /dev/null 2>&1; then
+              echo "::error::the $stage gate passed a deliberately broken fixture"
+              exit 1
+            fi
+          done
+          echo "golden fixtures pass and broken fixtures fail, as expected"
