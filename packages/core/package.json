@@ -1,0 +1,14 @@
+{
+  "name": "@power/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": "./dist/index.js" },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
+    "@power/agents": "workspace:*",
+    "@power/gates": "workspace:*"
+  }
+}
