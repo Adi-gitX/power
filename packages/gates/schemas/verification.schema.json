@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "power/verification.schema.json",
+  "title": "verification.json",
+  "description": "The fresh-context acceptance verdict. `pass` is cross-checked against per-criterion results and the visual score by the gate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pass", "visual_score", "criteria", "issues", "summary"],
+  "properties": {
+    "pass": { "type": "boolean" },
+    "visual_score": { "type": "number", "minimum": 1, "maximum": 5 },
+    "criteria": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "result", "observation", "priority"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^R[0-9]+$" },
+          "result": { "enum": ["pass", "fail"] },
+          "priority": { "enum": ["P0", "P1", "P2"] },
+          "observation": {
+            "type": "string",
+            "minLength": 20,
+            "description": "What was done and what happened. Not a restatement of the requirement."
+          },
+          "verified_by_interaction": { "type": "boolean" }
+        }
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "where", "problem", "expected"],
+        "properties": {
+          "severity": { "enum": ["blocker", "major", "minor"] },
+          "where": { "type": "string", "minLength": 1 },
+          "problem": { "type": "string", "minLength": 10 },
+          "expected": { "type": "string", "minLength": 10 },
+          "fix_hint": { "type": "string" }
+        }
+      }
+    },
+    "summary": { "type": "string", "minLength": 20 }
+  }
+}
