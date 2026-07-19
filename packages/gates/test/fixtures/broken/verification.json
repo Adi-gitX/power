@@ -1,0 +1,22 @@
+{
+  "pass": true,
+  "visual_score": 2.5,
+  "criteria": [
+    {
+      "id": "R1",
+      "result": "fail",
+      "priority": "P0",
+      "verified_by_interaction": true,
+      "observation": "Pushed tag v0.2.0; no draft was created and the worker log shows an unhandled error."
+    },
+    {
+      "id": "R2",
+      "result": "pass",
+      "priority": "P0",
+      "verified_by_interaction": false,
+      "observation": "Screenshotted the drafts index page and the first-release draft appeared to be present."
+    }
+  ],
+  "issues": [],
+  "summary": "Claims a pass while a P0 criterion failed, another was only screenshotted, and the visual score is below the bar."
+}

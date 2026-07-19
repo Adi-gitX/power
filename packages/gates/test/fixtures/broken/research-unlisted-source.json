@@ -1,0 +1,31 @@
+{
+  "summary": "A plausible-looking research document whose citations do not all appear in the bibliography, which is how a fabricated URL survives review.",
+  "unknowns_resolved": [
+    {
+      "question": "Do existing tools work without conventional commits?",
+      "answer": "No; they require a commit convention.",
+      "resolved": true,
+      "source_url": "https://example.invalid/fabricated-study"
+    }
+  ],
+  "prior_art": [
+    {
+      "name": "release-please",
+      "url": "https://github.com/googleapis/release-please",
+      "gaps": ["Requires conventional commits"]
+    }
+  ],
+  "users": {
+    "pain_points": [
+      {
+        "point": "Maintainers reconstruct changelogs by hand at release time",
+        "severity": "high",
+        "source_url": "https://opensourcesurvey.org/2017/"
+      }
+    ]
+  },
+  "feasibility": { "constraints": [] },
+  "sources": [
+    { "url": "https://opensourcesurvey.org/2017/", "tier": "secondary" }
+  ]
+}
