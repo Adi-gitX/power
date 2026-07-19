@@ -1,0 +1,37 @@
+{
+  "pass": true,
+  "visual_score": 4.0,
+  "criteria": [
+    {
+      "id": "R1",
+      "result": "pass",
+      "priority": "P0",
+      "verified_by_interaction": true,
+      "observation": "Pushed tag v0.2.0 to the fixture repository; a draft appeared at /drafts/7 within 14 seconds listing all six pull requests merged since v0.1.0."
+    },
+    {
+      "id": "R2",
+      "result": "pass",
+      "priority": "P0",
+      "verified_by_interaction": true,
+      "observation": "Pushed the first tag on a fresh repository; the draft listed all three merged pull requests in the repository history rather than erroring."
+    },
+    {
+      "id": "R3",
+      "result": "pass",
+      "priority": "P1",
+      "verified_by_interaction": true,
+      "observation": "Draft rendered four headings; the two unlabelled pull requests appeared under Changed as specified."
+    }
+  ],
+  "issues": [
+    {
+      "severity": "minor",
+      "where": "GET /drafts/{id}",
+      "problem": "The draft page has no visible timestamp, so it is unclear whether a draft is stale",
+      "expected": "Show the generation time alongside the tag name",
+      "fix_hint": "Render created_at in the draft header"
+    }
+  ],
+  "summary": "All three requirements verified by real interaction against the fixture repository. One minor presentation issue, no blockers."
+}

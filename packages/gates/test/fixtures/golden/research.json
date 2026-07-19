@@ -1,0 +1,58 @@
+{
+  "summary": "Automated changelog generation is well served for conventional-commit repositories and poorly served for repositories that squash-merge pull requests with free-form titles, which is the majority of small libraries.",
+  "unknowns_resolved": [
+    {
+      "question": "Do existing tools work without conventional commits?",
+      "answer": "release-please requires conventional commits; git-cliff can parse arbitrary messages via regex but needs per-repository configuration.",
+      "resolved": true,
+      "source_url": "https://github.com/googleapis/release-please"
+    },
+    {
+      "question": "What rate limits apply to listing merged pull requests?",
+      "answer": "Could not determine the exact secondary rate limit for the search endpoint; primary limit is 5000 requests per hour for authenticated apps.",
+      "resolved": false
+    }
+  ],
+  "prior_art": [
+    {
+      "name": "release-please",
+      "url": "https://github.com/googleapis/release-please",
+      "strengths": ["Mature", "Handles monorepos"],
+      "gaps": ["Requires conventional commits", "Owns the release process end to end"]
+    },
+    {
+      "name": "git-cliff",
+      "url": "https://git-cliff.org",
+      "strengths": ["Configurable parsing"],
+      "gaps": ["Per-repository configuration is a setup cost", "Commit-oriented, not pull-request oriented"]
+    }
+  ],
+  "users": {
+    "pain_points": [
+      {
+        "point": "Maintainers reconstruct changelogs from commit logs at release time, which is slow and error-prone",
+        "severity": "high",
+        "evidence": "Recurring theme in maintainer surveys and issue threads requesting automation",
+        "source_url": "https://opensourcesurvey.org/2017/"
+      }
+    ]
+  },
+  "feasibility": {
+    "constraints": [
+      {
+        "constraint": "Listing pull requests merged in a tag range requires two API calls plus pagination",
+        "impact": "Draft generation latency scales with the number of merged pull requests, so the 60 second target needs pagination in the worker rather than the request path",
+        "source_url": "https://docs.github.com/en/rest/pulls/pulls"
+      }
+    ]
+  },
+  "open_questions": [
+    "Exact secondary rate limit for the pull request search endpoint remains unresolved."
+  ],
+  "sources": [
+    { "url": "https://github.com/googleapis/release-please", "title": "release-please", "tier": "primary", "accessed": "2026-07-27" },
+    { "url": "https://git-cliff.org", "title": "git-cliff", "tier": "primary", "accessed": "2026-07-27" },
+    { "url": "https://docs.github.com/en/rest/pulls/pulls", "title": "Pulls REST API", "tier": "vendor", "accessed": "2026-07-27" },
+    { "url": "https://opensourcesurvey.org/2017/", "title": "Open Source Survey", "tier": "secondary", "accessed": "2026-07-27" }
+  ]
+}
