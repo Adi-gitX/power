@@ -1,0 +1,23 @@
+name: managed_agents_session
+title: Driving a Managed Agents session from a client
+version: 1
+category: integration
+owner: platform
+summary: >-
+  Correct client-side handling of a Managed Agents session: stream-before-send,
+  gap-free reconnect, the idle-is-not-terminal gate, and custom tool round-trips.
+matching_criteria:
+  - the task drives an Anthropic Managed Agents session from client code
+  - the task consumes a session event stream, or handles agent.custom_tool_use
+  - the task creates agents, environments, sessions, or memory stores
+anti_criteria:
+  - the task only makes single Messages API calls with no session involved
+  - the task uses the Claude Agent SDK, which is a different product with its own loop
+requires_secrets:
+  - ANTHROPIC_API_KEY
+tags: [anthropic, managed-agents, streaming]
+content: managed_agents_session.md
+testing_instructions: >-
+  Assert the reconnect path explicitly: open a stream, drop it mid-session, reconnect,
+  and verify no event is processed twice and none is lost. A test that only covers the
+  happy stream will not catch the failure this pack exists to prevent.
