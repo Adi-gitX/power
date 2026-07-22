@@ -1,0 +1,22 @@
+name: byok_key_custody
+title: Custody of a customer's own API key
+version: 1
+category: compliance
+owner: platform
+summary: >-
+  Storing, using, and rotating a customer-supplied provider key: envelope
+  encryption, never logging plaintext, and keeping the secret out of the sandbox.
+matching_criteria:
+  - the task stores or handles a credential supplied by an end user
+  - the task implements a bring-your-own-key connection flow
+  - the task touches key rotation, revocation, or per-tenant encryption
+anti_criteria:
+  - the credential is a platform-owned key read from the process environment and never persisted
+requires_secrets:
+  - POWER_KMS_KEY_ID
+tags: [security, byok, encryption]
+content: byok_key_custody.md
+testing_instructions: >-
+  Assert that plaintext never reaches a log sink: capture the logger during a full
+  connect-and-run cycle and fail if the key material appears in any record. Assert that
+  a rotated key invalidates the previous ciphertext.
