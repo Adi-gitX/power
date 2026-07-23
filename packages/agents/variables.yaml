@@ -1,0 +1,8 @@
+# Build-time variables, substituted into `{{name}}` placeholders at render time.
+# A reference to a name that is not defined here is a hard build failure.
+variables:
+  product_name: "Power"
+  memory_root: "/mnt/memory/power"
+  workspace_root: "/workspace"
+  visual_score_bar: "3.5"
+  max_retries: "2"

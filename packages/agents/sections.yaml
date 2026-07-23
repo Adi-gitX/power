@@ -1,0 +1,17 @@
+# Reusable prompt fragments. The including template decides the order; this file
+# only declares what exists and which runtime placeholders each fragment needs.
+sections:
+  constitution:
+    template: sections/constitution.md
+  artifact_bus:
+    template: sections/artifact_bus.md
+  gate_protocol:
+    template: sections/gate_protocol.md
+  untrusted_input:
+    template: sections/untrusted_input.md
+  citation_discipline:
+    template: sections/citation_discipline.md
+  ears_format:
+    template: sections/ears_format.md
+  reporting_style:
+    template: sections/reporting_style.md

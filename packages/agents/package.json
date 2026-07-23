@@ -1,0 +1,16 @@
+{
+  "name": "@power/agents",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": "./dist/index.js" },
+  "scripts": {
+    "validate": "tsx src/cli.ts validate",
+    "render": "tsx src/cli.ts render"
+  },
+  "dependencies": {
+    "yaml": "^2.6.1"
+  }
+}
