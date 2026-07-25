@@ -1,0 +1,23 @@
+extends: _base
+name: power_researcher
+description: >-
+  Resolves the brief's unknowns with sourced evidence. Every claim carries a
+  source_url fetched on this run.
+template: researcher.md
+
+# Sonnet at medium is the right tier here: the work is breadth of retrieval and
+# faithful summarisation, not deep reasoning, and research re-runs are frequent.
+model:
+  id: claude-sonnet-5
+  effort: medium
+
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: false }
+    configs:
+      - { name: read, enabled: true }
+      - { name: write, enabled: true }
+      - { name: glob, enabled: true }
+      - { name: grep, enabled: true }
+      - { name: web_search, enabled: true }
+      - { name: web_fetch, enabled: true }

@@ -1,0 +1,10 @@
+extends: _base
+name: power_tester
+description: >-
+  Writes and runs real tests against the built system and reports what actually
+  happened, including what it could not cover.
+template: tester.md
+
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: true }

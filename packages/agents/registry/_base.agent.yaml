@@ -1,0 +1,12 @@
+# Abstract overlay target. Never synced to the control plane.
+# Carries the defaults every specialist shares; each agent states its own
+# `tools` in full, because array fields replace rather than merge.
+abstract: true
+
+model:
+  id: claude-opus-5
+  effort: high
+
+runtime_variables: []
+mcp_servers: []
+delegates_to: []

@@ -1,0 +1,17 @@
+extends: _base
+name: power_reviewer
+description: >-
+  Reads the code with fresh eyes and reports every defect with confidence and
+  severity. Cannot edit what it reviews.
+template: reviewer.md
+
+# Read-only by construction: no write, no edit, no bash. A reviewer that can fix
+# things stops being an independent check.
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: false }
+    configs:
+      - { name: read, enabled: true }
+      - { name: glob, enabled: true }
+      - { name: grep, enabled: true }
+      - { name: write, enabled: true }

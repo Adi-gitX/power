@@ -1,0 +1,16 @@
+extends: _base
+name: power_implementer
+description: >-
+  Builds what the spec specifies, in the workspace, and verifies its own work
+  before reporting done.
+template: implementer.md
+
+# xhigh is the documented sweet spot for coding and agentic work on Opus 5.
+model:
+  id: claude-opus-5
+  effort: xhigh
+
+# The only agent with the full toolset, including bash.
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: true }

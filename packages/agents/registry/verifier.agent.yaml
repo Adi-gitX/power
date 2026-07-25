@@ -1,0 +1,29 @@
+extends: _base
+name: power_verifier
+description: >-
+  Fresh-context acceptance pass before anything ships. Exercises every primary
+  path by real interaction and scores presentation. Cannot edit.
+template: verifier.md
+
+# Look and click, but no edit and no bash — the verifier must not be able to fix
+# what it is judging.
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: false }
+    configs:
+      - { name: read, enabled: true }
+      - { name: glob, enabled: true }
+      - { name: grep, enabled: true }
+      - { name: write, enabled: true }
+  - type: custom
+    name: run_gate
+    description: >-
+      Run the deterministic gate for a pipeline stage. Returns
+      {"pass": bool, "errors": [{"artifact","field","rule","detail"}]}.
+    input_schema:
+      type: object
+      properties:
+        stage:
+          type: string
+          enum: [research, spec, verification]
+      required: [stage]

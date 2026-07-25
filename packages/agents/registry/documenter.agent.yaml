@@ -1,0 +1,21 @@
+extends: _base
+name: power_documenter
+description: >-
+  Documents the system as built — README, ADRs, and interface docs — flagging
+  anywhere the code diverges from the spec.
+template: documenter.md
+
+model:
+  id: claude-sonnet-5
+  effort: medium
+
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: false }
+    configs:
+      - { name: read, enabled: true }
+      - { name: write, enabled: true }
+      - { name: edit, enabled: true }
+      - { name: glob, enabled: true }
+      - { name: grep, enabled: true }
+      - { name: bash, enabled: true }

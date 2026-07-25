@@ -1,0 +1,41 @@
+extends: _base
+name: power_orchestrator
+description: >-
+  Coordinator. Plans the run, routes work to specialists, owns the state machine
+  and the single human approval gate. Has no capability tools by design.
+template: orchestrator.md
+
+# The toolset is the enforcement mechanism: with no bash, no web, and no editor,
+# "you conduct, you don't perform" is structural rather than an instruction the
+# model might drift from.
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: false }
+    configs:
+      - { name: read, enabled: true }
+      - { name: write, enabled: true }
+      - { name: glob, enabled: true }
+      - { name: grep, enabled: true }
+  - type: custom
+    name: run_gate
+    description: >-
+      Run the deterministic gate for a pipeline stage. Returns
+      {"pass": bool, "errors": [{"artifact","field","rule","detail"}]}.
+      Call this at every stage boundary; a stage is complete only when it passes.
+    input_schema:
+      type: object
+      properties:
+        stage:
+          type: string
+          enum: [research, spec, verification]
+          description: The pipeline stage whose artifacts should be checked.
+      required: [stage]
+
+delegates_to:
+  - power_researcher
+  - power_architect
+  - power_implementer
+  - power_reviewer
+  - power_tester
+  - power_verifier
+  - power_documenter

@@ -1,0 +1,28 @@
+extends: _base
+name: power_architect
+description: >-
+  Turns research into a buildable spec: traceable requirements with EARS
+  acceptance criteria, data model, interface contracts, and P0/P1/P2 tasks.
+template: architect.md
+
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: false }
+    configs:
+      - { name: read, enabled: true }
+      - { name: write, enabled: true }
+      - { name: glob, enabled: true }
+      - { name: grep, enabled: true }
+      - { name: web_search, enabled: true }
+  - type: custom
+    name: run_gate
+    description: >-
+      Run the deterministic gate for a pipeline stage. Returns
+      {"pass": bool, "errors": [{"artifact","field","rule","detail"}]}.
+    input_schema:
+      type: object
+      properties:
+        stage:
+          type: string
+          enum: [research, spec, verification]
+      required: [stage]
