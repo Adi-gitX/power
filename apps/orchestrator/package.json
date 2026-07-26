@@ -1,0 +1,16 @@
+{
+  "name": "@power/orchestrator",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync": "tsx src/cli.ts sync",
+    "run": "tsx src/cli.ts run",
+    "gate": "tsx src/cli.ts gate"
+  },
+  "dependencies": {
+    "@power/agents": "workspace:*",
+    "@power/core": "workspace:*",
+    "@power/gates": "workspace:*"
+  }
+}
