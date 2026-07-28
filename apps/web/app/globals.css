@@ -1,0 +1,175 @@
+@import 'tailwindcss';
+
+/**
+ * Warm, editorial, and seamless.
+ *
+ * The palette is built the way Claude's own surfaces are: a paper canvas that is
+ * never pure white, warm greys rather than blue-greys, and exactly one saturated
+ * colour used sparingly. Nothing here is a neutral picked from a default scale —
+ * every grey carries a little yellow, which is what stops a light page reading as
+ * clinical.
+ *
+ * **Seamless means no background switches anywhere.** There is one canvas from
+ * the top of the hero to the bottom of the footer. Depth comes from three things
+ * instead: white cards lifted a half-step off the paper, hairline borders in a
+ * warm tint rather than grey, and a fixed ambient wash that content scrolls
+ * *through* rather than one that belongs to any section. That last detail is what
+ * removes the seams — the light never moves with the content, so there is no edge
+ * where one section's background ends and the next begins.
+ *
+ * Contrast was computed, not eyeballed. The dimmest text on the most sunken
+ * surface is 4.91:1; the accent clears AA both as link text on the canvas
+ * (4.76:1) and as a fill beneath white (5.01:1), which is why it is this
+ * particular terracotta and not the brighter one it is derived from.
+ */
+@theme {
+  --color-canvas: #faf9f5;
+  --color-surface: #ffffff;
+  --color-sunken: #f3f1ea;
+  --color-code: #262320;
+
+  --color-ink: #191817;
+  --color-bodytext: #3d3a34;
+  --color-mutedtext: #6b6862;
+  --color-hairline: #e7e3d9;
+
+  --color-accent: #b4522f;
+  --color-accent-soft: #c96442;
+
+  --font-sans: var(--font-figtree), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-display), ui-serif, Georgia, serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --animate-accordion-down: accordion-down 0.25s ease-out;
+  --animate-accordion-up: accordion-up 0.25s ease-out;
+}
+
+@keyframes accordion-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+  }
+}
+
+@keyframes accordion-up {
+  from {
+    height: var(--radix-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
+}
+
+@keyframes tab-fade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tab-fade {
+  animation: tab-fade 0.22s ease-out;
+}
+
+html {
+  scroll-behavior: smooth;
+  background-color: var(--color-canvas);
+  color-scheme: light;
+}
+
+body {
+  position: relative;
+  background-color: var(--color-canvas);
+  color: var(--color-bodytext);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/*
+ * The ambient wash. Fixed to the viewport and behind everything, so no section
+ * owns it and no boundary between sections can be seen. Warm and very low
+ * amplitude — it should register as the paper being unevenly lit, never as a
+ * gradient someone applied.
+ */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(64rem 44rem at 8% -10%, rgba(201, 100, 66, 0.07), transparent 62%),
+    radial-gradient(52rem 40rem at 94% 6%, rgba(196, 154, 96, 0.06), transparent 64%),
+    radial-gradient(72rem 52rem at 48% 106%, rgba(180, 82, 47, 0.05), transparent 66%);
+}
+
+/*
+ * Display type. The serif is reserved for headings and never used below ~24px —
+ * a high-contrast face at small sizes turns to mush, and the whole reason it is
+ * here is the editorial weight it gives at large ones.
+ */
+.display {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.015em;
+}
+
+/*
+ * The hero's moving text, styled here rather than with a `font-family`
+ * presentation attribute on the SVG. Presentation attributes do not resolve CSS
+ * custom properties, so the variable set by `next/font` silently fell back to
+ * the sans face there while every other heading used the serif.
+ */
+.hero-seg {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
+::selection {
+  background-color: var(--color-ink);
+  color: var(--color-canvas);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /*
+   * There is deliberately no rule here forcing the scroll reveals visible.
+   *
+   * An earlier version needed one: the reveals declared `opacity: 0` in markup
+   * and depended on JavaScript to bring them back, so anything that stopped the
+   * animation — reduced motion, a failed observer — hid the whole page, and only
+   * an `!important` override could rescue it. The reveals now use `gsap.from()`,
+   * which animates *out of* a hidden state into the visible one the element
+   * already has. There is nothing to force back, because nothing was ever taken
+   * away. `gsap.matchMedia` simply does not register the tween here.
+   */
+
+  /*
+   * Collapse the hero's tall scroll region. On desktop it exists only to give
+   * the pinned animation something to scrub against; with the animation off it
+   * is empty scrolling in front of one screen of content.
+   */
+  [data-hero] {
+    height: auto !important;
+    min-height: 100vh;
+  }
+}
