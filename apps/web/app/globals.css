@@ -78,6 +78,7 @@
 }
 
 html {
+  --ambient-shift: 0px;
   scroll-behavior: smooth;
   background-color: var(--color-canvas);
   color-scheme: light;
@@ -113,10 +114,24 @@ body::before {
   inset: 0;
   z-index: -1;
   pointer-events: none;
+  /* Driven by `Ambient.tsx`. A pseudo-element cannot be tweened directly, so the
+     drift is expressed through this property instead. */
   background:
-    radial-gradient(64rem 44rem at 8% -10%, rgba(201, 100, 66, 0.07), transparent 62%),
-    radial-gradient(52rem 40rem at 94% 6%, rgba(196, 154, 96, 0.06), transparent 64%),
-    radial-gradient(72rem 52rem at 48% 106%, rgba(180, 82, 47, 0.05), transparent 66%);
+    radial-gradient(
+      64rem 44rem at 8% calc(-10% - var(--ambient-shift)),
+      rgba(201, 100, 66, 0.07),
+      transparent 62%
+    ),
+    radial-gradient(
+      52rem 40rem at 94% calc(6% + var(--ambient-shift) * 0.6),
+      rgba(196, 154, 96, 0.06),
+      transparent 64%
+    ),
+    radial-gradient(
+      72rem 52rem at 48% calc(106% - var(--ambient-shift) * 0.8),
+      rgba(180, 82, 47, 0.05),
+      transparent 66%
+    );
 }
 
 /*

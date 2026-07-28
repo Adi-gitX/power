@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { gsap, useGSAP } from '@/lib/motion';
+import { SplitReveal } from './SplitReveal';
 import { Reveal } from './Reveal';
 import { CodeBlock, CopyButton, StepList } from './Code';
 import { COMMANDS, INSTALL } from '@/lib/site';
@@ -37,9 +38,9 @@ export function Install() {
   return (
     <section id="install" className="mx-auto max-w-6xl px-5 py-20 text-center sm:px-8">
       <Reveal>
-        <h2 className="display text-3xl text-ink sm:text-[2.6rem]">
+        <SplitReveal className="display text-3xl text-ink sm:text-[2.6rem]">
           Install it in a minute
-        </h2>
+        </SplitReveal>
         <p className="mt-3 text-base text-mutedtext">
           Power runs on the Claude Code session you already have. There is no API key and
           nothing to deploy.

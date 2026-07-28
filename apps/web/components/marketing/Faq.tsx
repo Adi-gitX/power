@@ -1,3 +1,4 @@
+import { SplitReveal } from './SplitReveal';
 import { Reveal } from './Reveal';
 import {
   Accordion,
@@ -77,9 +78,9 @@ export function Faq() {
   return (
     <section id="faq" className="mx-auto max-w-3xl px-5 py-20 sm:px-8">
       <Reveal>
-        <h2 className="text-center display text-3xl text-ink sm:text-[2.6rem]">
+        <SplitReveal className="text-center display text-3xl text-ink sm:text-[2.6rem]">
           Frequently asked questions
-        </h2>
+        </SplitReveal>
       </Reveal>
 
       <Reveal delay={0.06} className="mt-8">

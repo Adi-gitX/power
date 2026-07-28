@@ -42,17 +42,25 @@ const FLAT_D = 'M0 195H644H1288H1932H2576';
 const SPACING_RATIO = 0.75;
 
 /**
- * When the composed three-line heading takes over, as a fraction of the hero's
- * scroll.
+ * The handover, as fractions of the hero's scroll.
  *
- * The reference resolved at 0.82–1.0, which puts the payoff in the last stride
- * of the section — the composition finishes at the exact moment it starts
- * scrolling out of view, so it is never actually seen finished. Ending at 0.8
- * leaves a full screen of scrolling where the heading simply sits there,
- * complete, before the page moves on.
+ * These are **sequenced, not cross-faded**, and that is the whole point. A
+ * cross-fade sounds right and looks wrong: for the middle of it both layers sit
+ * at around half opacity, and the moving line — one phrase, the full width of
+ * the screen — cuts straight through the three stacked lines of the composed
+ * heading. The result is unreadable mush that no amount of easing fixes,
+ * because the two states are simply different pictures.
+ *
+ * So the moving text is gone before the composition begins. `HANDOFF` is where
+ * the last phrase has cleared the path and the SVG has faded to nothing;
+ * `COMPOSE_START` is deliberately after it, leaving a beat of empty canvas
+ * between the two. The gap reads as intentional — the sentence finishes, then
+ * the statement arrives.
  */
-const FADE_START = 0.58;
-const FADE_END = 0.8;
+const SWEEP_OUT = 0.52;
+const HANDOFF = 0.62;
+const COMPOSE_START = 0.66;
+const COMPOSE_END = 0.82;
 
 /**
  * When the whole hero fades out, as a fraction of its scroll.
@@ -64,7 +72,7 @@ const FADE_END = 0.8;
  * actually leave. Between `FADE_END` and here the composition simply holds,
  * which is the beat that makes it feel finished rather than interrupted.
  */
-const EXIT_START = 0.88;
+const EXIT_START = 0.9;
 
 export interface HeroProgress {
   /** 0 while the moving text owns the screen, 1 once the composition has taken over. */
@@ -102,7 +110,7 @@ export function HeroAnimation({ onProgress }: { onProgress?: (p: HeroProgress) =
       // heading that has already faded in on top of it.
       const last = segEls.length - 1;
       const travel = starts[last]! + widths[last]! + len * 0.08;
-      const headEnd = travel / FADE_END;
+      const headEnd = travel / HANDOFF;
 
       const morphTween = gsap.to(line, {
         duration: 1,
@@ -133,12 +141,15 @@ export function HeroAnimation({ onProgress }: { onProgress?: (p: HeroProgress) =
           el.style.opacity = onPath ? '1' : '0';
         });
 
-        // Hand over to the parent, which cross-fades to the static composition
-        // that was server-rendered and then clears the hero out of the way.
-        const fade = clamp01((prog - FADE_START) / (FADE_END - FADE_START));
-        if (svgRef.current) svgRef.current.style.opacity = String(1 - fade);
+        // Sequenced handover. The SVG is fully out at HANDOFF; the composition
+        // does not start until COMPOSE_START. They never share the screen.
+        if (svgRef.current) {
+          svgRef.current.style.opacity = String(
+            1 - clamp01((prog - SWEEP_OUT) / (HANDOFF - SWEEP_OUT)),
+          );
+        }
         onProgress?.({
-          composed: fade,
+          composed: clamp01((prog - COMPOSE_START) / (COMPOSE_END - COMPOSE_START)),
           visible: 1 - clamp01((prog - EXIT_START) / (1 - EXIT_START)),
         });
       };

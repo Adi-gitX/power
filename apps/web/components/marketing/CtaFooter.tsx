@@ -1,3 +1,4 @@
+import { SplitReveal } from './SplitReveal';
 import { Reveal } from './Reveal';
 import { CopyButton } from './Code';
 import { INSTALL, SITE } from '@/lib/site';
@@ -13,9 +14,9 @@ export function CtaFooter() {
       <div className="relative border-t border-hairline">
         <div className="relative mx-auto max-w-6xl px-5 py-24 text-center sm:px-8 sm:py-36">
           <Reveal className="mx-auto flex max-w-xl flex-col items-center [text-shadow:0_1px_12px_rgba(0,0,0,0.25)]">
-            <h2 className="display text-4xl leading-[1.06] text-ink sm:text-5xl">
-              Point it at something and walk away.
-            </h2>
+            <SplitReveal className="display text-4xl leading-[1.06] text-ink sm:text-5xl">
+          Point it at something and walk away.
+        </SplitReveal>
             <p className="mt-4 text-base text-mutedtext sm:text-lg">
               Two commands, and the session you already have open.
             </p>

@@ -71,23 +71,36 @@ export function Hero() {
           the animation runs it fades up as the moving text resolves; otherwise
           it simply is the hero. Either way this is the markup a crawler indexes.
         */}
-        <div
-          className="pointer-events-none absolute inset-0 flex items-center justify-center px-6"
-          style={{ opacity: animated ? composed : 1 }}
-        >
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6">
           <div className="flex flex-col items-start gap-3 sm:gap-4">
             <h1 className="sr-only">
               {SITE.name} — {SITE.tagline}
             </h1>
-            {PHRASES.map((phrase) => (
-              <p
-                key={phrase}
-                aria-hidden="true"
-                className="display text-5xl leading-[1.05] text-ink sm:text-7xl lg:text-[5.5rem]"
-              >
-                {phrase}
-              </p>
-            ))}
+            {/*
+              Each line rises out of its own mask as the composition takes over,
+              instead of the whole block fading in at once. Staggering the three
+              across the handover turns a state change into a sentence being
+              spoken. Driven from scroll progress rather than a tween, so
+              scrubbing backwards runs it backwards.
+            */}
+            {PHRASES.map((phrase, i) => {
+              const local = Math.min(1, Math.max(0, (composed - i * 0.16) / 0.52));
+              return (
+                <span key={phrase} className="block overflow-hidden pb-[0.08em]">
+                  <span
+                    aria-hidden="true"
+                    className="display block text-5xl leading-[1.05] text-ink sm:text-7xl lg:text-[5.5rem]"
+                    style={
+                      animated
+                        ? { transform: `translateY(${(1 - local) * 110}%)`, opacity: local }
+                        : undefined
+                    }
+                  >
+                    {phrase}
+                  </span>
+                </span>
+              );
+            })}
           </div>
         </div>
 

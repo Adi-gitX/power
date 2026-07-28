@@ -1,3 +1,4 @@
+import { SplitReveal } from './SplitReveal';
 import { Reveal, RevealGroup } from './Reveal';
 import { CircleAlert, RefreshCw, Eye, FileQuestion, Timer } from 'lucide-react';
 
@@ -20,9 +21,9 @@ export function Shift() {
   return (
     <section id="why" className="mx-auto max-w-5xl px-5 py-20 text-center sm:px-8">
       <Reveal>
-        <h2 className="mx-auto max-w-2xl display text-3xl text-ink sm:text-[2.6rem]">
+        <SplitReveal className="mx-auto max-w-2xl display text-3xl text-ink sm:text-[2.6rem]">
           The work is not writing the code. It is trusting it.
-        </h2>
+        </SplitReveal>
         <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-mutedtext">
           An agent that reports its own success gives you a second job: checking. Power
           replaces that with checks that run as code, and stops when they fail.

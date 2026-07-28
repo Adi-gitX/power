@@ -1,3 +1,4 @@
+import { SplitReveal } from './SplitReveal';
 import { Reveal, RevealGroup } from './Reveal';
 
 const STEPS = [
@@ -22,9 +23,9 @@ export function HowItWorks() {
   return (
     <section id="how" className="mx-auto max-w-5xl px-5 py-20 text-center sm:px-8">
       <Reveal>
-        <h2 className="mx-auto max-w-2xl display text-3xl text-ink sm:text-[2.6rem]">
+        <SplitReveal className="mx-auto max-w-2xl display text-3xl text-ink sm:text-[2.6rem]">
           Three steps, one of them yours
-        </h2>
+        </SplitReveal>
         <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-mutedtext">
           Research being wrong is cheap to redo. A built system being wrong is not — so
           the one approval sits exactly where the cost of being wrong becomes real.

@@ -1,3 +1,4 @@
+import { SplitReveal } from './SplitReveal';
 import { Reveal, RevealGroup } from './Reveal';
 import { ShieldCheck, Repeat, UserCheck, Lock, Save, Users } from 'lucide-react';
 
@@ -43,9 +44,9 @@ export function Capabilities() {
   return (
     <section id="capabilities" className="mx-auto max-w-5xl px-5 py-20 text-center sm:px-8">
       <Reveal>
-        <h2 className="mx-auto max-w-xl display text-3xl text-ink sm:text-[2.6rem]">
+        <SplitReveal className="mx-auto max-w-xl display text-3xl text-ink sm:text-[2.6rem]">
           Autonomy you can leave alone
-        </h2>
+        </SplitReveal>
         <p className="mx-auto mt-4 max-w-lg text-base leading-relaxed text-mutedtext">
           Not because it always gets it right — because when it does not, it stops and
           tells you which rule it failed.
