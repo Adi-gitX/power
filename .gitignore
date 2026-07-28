@@ -12,3 +12,6 @@ coverage/
 .next/
 out/
 next-env.d.ts
+
+# Electron
+apps/desktop/out/

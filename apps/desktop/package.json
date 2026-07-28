@@ -1,0 +1,32 @@
+{
+  "name": "@power/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "out/main/index.js",
+  "description": "Power for macOS — drive and supervise gated agent runs from a native app.",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "package": "electron-vite build && electron-builder --mac --dir",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+  },
+  "dependencies": {
+    "gsap": "^3.15.0",
+    "lucide-react": "^1.27.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^38.4.0",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^4.0.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.7.2",
+    "vite": "^7.1.0"
+  }
+}
