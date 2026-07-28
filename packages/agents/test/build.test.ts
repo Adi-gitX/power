@@ -1,7 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { loadRegistry, REGISTRY_ROOT } from '../src/registry.js';
 import { build, splitBlocks, verifyPointers, BuildError } from '../src/build.js';
 import type { RenderedAgent } from '../src/types.js';
+
+/** Repository root — the plugin root, two levels up from `packages/agents`. */
+const PLUGIN_ROOT = join(REGISTRY_ROOT, '..', '..');
 
 const registry = loadRegistry(REGISTRY_ROOT, 'plugin');
 const output = build(registry.agents, registry.sharedSections);
@@ -195,6 +200,44 @@ describe('role boundaries survive into the plugin tool grants', () => {
   it('gives the implementer the full toolset', () => {
     for (const tool of ['Read', 'Write', 'Edit', 'Bash']) {
       expect(tools('implementer')).toMatch(new RegExp(`\\b${tool}\\b`));
+    }
+  });
+});
+
+/**
+ * The skill is hand-written and the agents are generated, so they drift in
+ * exactly one direction: rename or add an agent in the registry and the skill's
+ * `allowed-tools` silently stops covering it. The failure is quiet — the
+ * dispatch is simply refused mid-run, long after the build looked fine.
+ */
+describe('the skill and the generated agents stay in sync', () => {
+  const skill = readFileSync(join(PLUGIN_ROOT, 'skills', 'power', 'SKILL.md'), 'utf8');
+
+  it.each(
+    registry.agents
+      .map((a) => a.plugin!.name)
+      // The orchestrator is the standalone driver persona — selected as a
+      // session's agent, never dispatched by the front desk.
+      .filter((name) => name !== 'orchestrator')
+      .map((name) => [name] as const),
+  )('SKILL.md grants Agent(power:%s)', (name) => {
+    expect(skill).toContain(`power:${name}`);
+  });
+
+  it('grants no agent that the build does not produce', () => {
+    const built = new Set(registry.agents.map((a) => a.plugin!.name));
+    for (const [, name] of skill.matchAll(/power:([a-z][a-z0-9-]*)/g)) {
+      expect(built, `SKILL.md grants power:${name}, which no registry entry produces`).toContain(
+        name,
+      );
+    }
+  });
+
+  it('references job recipes that exist', () => {
+    for (const [, path] of skill.matchAll(/\$\{CLAUDE_SKILL_DIR\}\/([^\s)]+)/g)) {
+      expect(() =>
+        readFileSync(join(PLUGIN_ROOT, 'skills', 'power', path!), 'utf8'),
+      ).not.toThrow();
     }
   });
 });

@@ -183,7 +183,7 @@ this design exists to avoid.
   anything — and the verification gate rejects a report whose
   `verified_by_interaction` is false. It still has no `Edit`, which is the
   boundary that matters.
-- **The end-to-end pipeline is newly wired.** Components are covered by 276 tests
+- **The end-to-end pipeline is newly wired.** Components are covered by 285 tests
   and the gates are exercised in both directions, but a full `/power build` run is
   the least-tested path in the repository.
 
@@ -224,7 +224,7 @@ unsubstituted `{{test-lakshya}}` all reached production.
 ## Testing
 
 ```bash
-pnpm check       # typecheck + both profiles validate + 276 tests
+pnpm check       # typecheck + both profiles validate + 285 tests
 ```
 
 The gate suite asserts in both directions: golden fixtures pass, and the
