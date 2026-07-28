@@ -1,0 +1,26 @@
+name: web_ui_components
+title: "Component sourcing: shadcn/ui, Radix, and registry components"
+version: 1
+category: integration
+owner: platform
+summary: >-
+  Where UI building blocks come from, in preference order: shadcn/ui vendored
+  primitives, Radix behaviour under custom skins, registry galleries (21st.dev
+  and similar) as audited starting material, hand-rolling only for the product's
+  own interaction. Includes the vendor-and-audit checklist (accessibility,
+  computed contrast, dependency weight, one motion system, server/client split)
+  and Tailwind token discipline.
+matching_criteria:
+  - the task builds React or Next.js user interface
+  - the task needs standard UI vocabulary — dialogs, dropdowns, tabs, forms, tables
+  - the task adapts components from a registry or gallery such as shadcn or 21st.dev
+anti_criteria:
+  - the project is not React-based, so shadcn/Radix do not apply
+requires_secrets: []
+tags: [web, react, shadcn, radix, tailwind, accessibility]
+content: web_ui_components.md
+testing_instructions: >-
+  For every interactive component adapted or vendored: drive it by keyboard end
+  to end, assert visible focus, assert Escape closes any disclosure and returns
+  focus to its opener, and assert aria-expanded/aria-controls are wired. Fail if
+  any icon-only control lacks an accessible name.

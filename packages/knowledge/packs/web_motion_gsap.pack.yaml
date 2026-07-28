@@ -1,0 +1,26 @@
+name: web_motion_gsap
+title: Motion with GSAP, without the failure modes
+version: 1
+category: design
+owner: platform
+summary: >-
+  The house animation doctrine for web work: GSAP as the single motion system,
+  gsap.from() so markup ships visible, matchMedia for reduced motion, sticky
+  pinning instead of DOM-rewriting pins (measured CLS 1.43 -> 0), SplitText
+  hygiene, and scroll-driven state for scrubbed effects. Every rule was earned by
+  breaking it on a shipped page and measuring the damage.
+matching_criteria:
+  - the task adds animation, scroll effects, or transitions to a web page
+  - the task builds a marketing or landing page with any motion at all
+  - the task uses GSAP, ScrollTrigger, SplitText, or considers a motion library
+anti_criteria:
+  - the surface is a CLI, API, or document with no rendered motion
+requires_secrets: []
+tags: [web, motion, gsap, performance]
+content: web_motion_gsap.md
+testing_instructions: >-
+  Scrub any pinned or scrubbed scene across its full range and assert no frame
+  shows two exclusive layers both above 0.15 opacity. Load the page with
+  JavaScript disabled and assert every section's text is visible. Enable
+  prefers-reduced-motion and assert no element sits below full opacity and no
+  split-text nodes exist in the DOM. Measure CLS on the built page; it must be 0.

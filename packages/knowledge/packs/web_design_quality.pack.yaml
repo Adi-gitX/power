@@ -1,0 +1,28 @@
+name: web_design_quality
+title: The modern-site quality bar
+version: 1
+category: design
+owner: platform
+summary: >-
+  What separates a designed page from a scaffold with utility classes: tinted
+  neutrals with one scarce accent, computed contrast written next to the tokens,
+  a two-face type system with a display serif never used small, seamless
+  single-canvas depth, show-don't-claim content, and verification that is
+  measured rather than assumed (copy present in static HTML, CLS 0 by
+  construction, compressing-server benchmarks). Applied and measured on a real
+  build: desktop 97-99, mobile 99-100, accessibility 100.
+matching_criteria:
+  - the task builds or restyles a user-facing web page and quality matters
+  - the task involves choosing palettes, typography, or page structure
+  - the task is a marketing site, landing page, portfolio, or product page
+anti_criteria:
+  - the surface is an internal tool where an unstyled scaffold is acceptable to the user
+requires_secrets: []
+tags: [web, design, typography, performance, accessibility]
+content: web_design_quality.md
+testing_instructions: >-
+  Grep the built HTML for the page's headline copy and fail if absent. Run
+  Lighthouse against a compressing static server: fail below 90 performance or
+  below 100 accessibility, or if CLS is nonzero. Verify every body-text/surface
+  contrast pair computes to at least 4.5:1. Check anchor jumps land headings
+  clear of any fixed header.
