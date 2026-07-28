@@ -1,0 +1,15 @@
+# Imported from the reference prompts repository (playbooks/LLM_INTEGRATION_CHAT_PLAYBOOK.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_llm_integration_chat_playbook
+title: "Llm Integration Chat Playbook"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Llm Integration Chat Playbook, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task calls a large language model API"
+  - "the task builds chat, completion, or conversation features"
+  - "the task integrates Llm Integration Chat Playbook"
+tags: [imported]
+content: imported/pb_llm_integration_chat_playbook.md

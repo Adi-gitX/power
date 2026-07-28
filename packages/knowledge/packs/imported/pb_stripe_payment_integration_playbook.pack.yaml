@@ -1,0 +1,16 @@
+# Imported from the reference prompts repository (playbooks/STRIPE_PAYMENT_INTEGRATION_PLAYBOOK.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_stripe_payment_integration_playbook
+title: "Stripe Payment Integration Playbook"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Stripe Payment Integration Playbook, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task takes payment, manages subscriptions, or handles checkout"
+  - "the task integrates a payment provider or webhook for payment events"
+  - "the task uploads, stores, or serves user files or media"
+  - "the task integrates Stripe Payment Integration Playbook"
+tags: [imported]
+content: imported/pb_stripe_payment_integration_playbook.md

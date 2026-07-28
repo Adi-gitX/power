@@ -1,0 +1,16 @@
+# Imported from the reference prompts repository (playbooks/OPEN_WEATHER_APP.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_open_weather_app
+title: "Open Weather App"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Open Weather App, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task shows maps, geocodes addresses, or works with place data"
+  - "the task uploads, stores, or serves user files or media"
+  - "the task builds search, retrieval, or embedding-backed features"
+  - "the task integrates Open Weather App"
+tags: [imported]
+content: imported/pb_open_weather_app.md

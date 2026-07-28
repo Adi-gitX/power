@@ -1,0 +1,17 @@
+# Imported from the reference prompts repository (playbooks/GEMINI_INTEGRATION_CHAT_WITH_VIDEO_ATTACHMENTS_PLAYBOOK.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_gemini_integration_chat_with_video_attachments_playbook
+title: "Gemini Integration Chat With Video Attachments Playbook"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Gemini Integration Chat With Video Attachments Playbook, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task calls a large language model API"
+  - "the task builds chat, completion, or conversation features"
+  - "the task shows maps, geocodes addresses, or works with place data"
+  - "the task uploads, stores, or serves user files or media"
+  - "the task integrates Gemini Integration Chat With Video Attachments Playbook"
+tags: [imported]
+content: imported/pb_gemini_integration_chat_with_video_attachments_playbook.md

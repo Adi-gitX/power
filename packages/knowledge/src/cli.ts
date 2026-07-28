@@ -8,6 +8,7 @@
  */
 import { loadPacks, PACKS_ROOT } from './registry.js';
 import { renderSelector, renderTestingInstructions } from './selector.js';
+import { importPlaybooks } from './import.js';
 import { PackError } from './types.js';
 
 function fail(message: string): never {
@@ -17,6 +18,44 @@ function fail(message: string): never {
 
 function main(): void {
   const [command, ...args] = process.argv.slice(2);
+
+  // Import runs before loading: it writes the packs the loader then validates.
+  if (command === 'import') {
+    const source = args[0];
+    if (!source) fail('usage: cli.ts import <path-to-prompts-repo>');
+    let result;
+    try {
+      result = importPlaybooks(source, PACKS_ROOT);
+    } catch (error) {
+      if (error instanceof PackError) fail(error.message);
+      throw error;
+    }
+    process.stdout.write(
+      `  ✓ imported ${result.written} packs ` +
+        `(${result.enabled} enabled, ${result.disabledPlatformBound.length} platform-bound ` +
+        `disabled, ${result.designPacks} design)\n`,
+    );
+    if (result.disabledPlatformBound.length > 0) {
+      process.stdout.write(
+        `    disabled: ${result.disabledPlatformBound.join(', ')}\n` +
+          `    each needs its platform-specific instructions adapted before enabling\n`,
+      );
+    }
+    if (result.skippedEmpty.length > 0) {
+      process.stdout.write(
+        `    skipped as effectively empty: ${result.skippedEmpty.join('; ')}\n`,
+      );
+    }
+    // Fall through to a full validation of what was just written.
+    try {
+      loadPacks(PACKS_ROOT);
+      process.stdout.write(`  ✓ imported packs validate\n`);
+    } catch (error) {
+      if (error instanceof PackError) fail(`import wrote invalid packs: ${error.message}`);
+      throw error;
+    }
+    return;
+  }
 
   let loaded;
   try {

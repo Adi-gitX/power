@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadPacks, PACKS_ROOT } from '../src/registry.js';
+import { renderSelector } from '../src/selector.js';
 import { renderSelector, renderTestingInstructions } from '../src/selector.js';
 import { PackError, type Pack } from '../src/types.js';
 
@@ -200,5 +201,36 @@ describe('the generated selector', () => {
 
   it('returns nothing when no pack contributes testing guidance', () => {
     expect(renderTestingInstructions([pack()])).toBe('');
+  });
+});
+
+describe('the imported corpus', () => {
+  const { packs } = loadPacks(PACKS_ROOT);
+  const imported = packs.filter((p) => p.tags?.includes('imported'));
+
+  it('is present at scale, not a token sample', () => {
+    expect(imported.length).toBeGreaterThan(100);
+  });
+
+  it('keeps platform-bound playbooks disabled so the selector never offers them', () => {
+    // These instruct the agent to call the source platform's own services;
+    // followed anywhere else they produce requests to endpoints that do not exist.
+    for (const name of ['pb_auth_v2', 'pb_gmail', 'pb_google_calendar']) {
+      const pack = packs.find((p) => p.name === name);
+      expect(pack, `${name} should be imported`).toBeDefined();
+      expect(pack!.enabled, `${name} must stay disabled until adapted`).toBe(false);
+    }
+    const selector = renderSelector(packs);
+    expect(selector).not.toContain('pb_auth_v2');
+  });
+
+  it('registers the design guidelines the source repo orphaned', () => {
+    const design = imported.filter((p) => p.category === 'design');
+    expect(design.length).toBeGreaterThan(20);
+    for (const pack of design) expect(pack.enabled).toBe(true);
+  });
+
+  it('carries provenance on every imported pack', () => {
+    for (const pack of imported) expect(pack.owner).toBe('prompts-repo');
   });
 });

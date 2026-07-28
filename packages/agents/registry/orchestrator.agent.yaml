@@ -60,6 +60,7 @@ plugin:
     - TodoWrite
     - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/gate.mjs" *)
     - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/run-state.mjs" *)
+    - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/knowledge.mjs" *)
     - Agent(power:researcher, power:architect, power:implementer, power:reviewer, power:tester, power:verifier, power:documenter)
   core_blocks:
     - identity

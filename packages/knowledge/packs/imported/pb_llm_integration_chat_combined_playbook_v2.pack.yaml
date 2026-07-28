@@ -1,0 +1,16 @@
+# Imported from the reference prompts repository (playbooks/LLM_INTEGRATION_CHAT_COMBINED_PLAYBOOK_V2.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_llm_integration_chat_combined_playbook_v2
+title: "Llm Integration Chat Combined Playbook V2 (≥2 of tool calling, files, images, multi-turn)"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Llm Integration Chat Combined Playbook V2 (≥2 of tool calling, files, images, multi-turn), imported from the reference playbook corpus."
+matching_criteria:
+  - "the task calls a large language model API"
+  - "the task builds chat, completion, or conversation features"
+  - "the task uploads, stores, or serves user files or media"
+  - "the task integrates Llm Integration Chat Combined Playbook V2 (≥2 of tool calling, files, images, multi-turn)"
+tags: [imported]
+content: imported/pb_llm_integration_chat_combined_playbook_v2.md

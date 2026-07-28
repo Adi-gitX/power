@@ -1,0 +1,16 @@
+# Imported from the reference prompts repository (playbooks/LLM_INTEGRATION_CHAT_WITH_TOOL_CALLING_V2.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_llm_integration_chat_with_tool_calling_v2
+title: "Llm Integration Chat With Tool Calling V2 (function calling + provider-hosted tools)"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Llm Integration Chat With Tool Calling V2 (function calling + provider-hosted tools), imported from the reference playbook corpus."
+matching_criteria:
+  - "the task calls a large language model API"
+  - "the task builds chat, completion, or conversation features"
+  - "the task builds search, retrieval, or embedding-backed features"
+  - "the task integrates Llm Integration Chat With Tool Calling V2 (function calling + provider-hosted tools)"
+tags: [imported]
+content: imported/pb_llm_integration_chat_with_tool_calling_v2.md

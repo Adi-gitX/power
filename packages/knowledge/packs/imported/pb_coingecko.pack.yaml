@@ -1,0 +1,16 @@
+# Imported from the reference prompts repository (playbooks/COINGECKO.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_coingecko
+title: "Coingecko"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Coingecko, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task uploads, stores, or serves user files or media"
+  - "the task fetches financial or market data from a provider API"
+  - "the task builds search, retrieval, or embedding-backed features"
+  - "the task integrates Coingecko"
+tags: [imported]
+content: imported/pb_coingecko.md

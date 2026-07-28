@@ -1,0 +1,17 @@
+# Imported from the reference prompts repository (playbooks/GEMINI_IMAGE_GENERATION_PLAYBOOK_V2.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_gemini_image_generation_playbook_v2
+title: "Gemini Image Generation Playbook"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Gemini Image Generation Playbook, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task calls a large language model API"
+  - "the task builds chat, completion, or conversation features"
+  - "the task generates images from prompts via a hosted model API"
+  - "the task uploads, stores, or serves user files or media"
+  - "the task integrates Gemini Image Generation Playbook"
+tags: [imported]
+content: imported/pb_gemini_image_generation_playbook_v2.md

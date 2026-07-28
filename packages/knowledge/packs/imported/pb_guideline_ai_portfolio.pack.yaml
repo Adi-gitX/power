@@ -1,0 +1,15 @@
+# Imported from the reference prompts repository (playbooks/Guideline-AI-portfolio.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_guideline_ai_portfolio
+title: "Guideline-Ai-Portfolio"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Guideline-Ai-Portfolio, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task extracts data from web pages or automates a browser"
+  - "the task manages calendars, bookings, or scheduled appointments"
+  - "the task integrates Guideline-Ai-Portfolio"
+tags: [imported]
+content: imported/pb_guideline_ai_portfolio.md

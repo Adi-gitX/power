@@ -1,0 +1,14 @@
+# Imported from the reference prompts repository (playbooks/RESEND_EMAIL.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_resend_email
+title: "Resend Email"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Resend Email, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task sends transactional or bulk email"
+  - "the task integrates Resend Email"
+tags: [imported]
+content: imported/pb_resend_email.md

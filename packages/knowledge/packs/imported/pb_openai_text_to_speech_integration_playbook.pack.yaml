@@ -1,0 +1,17 @@
+# Imported from the reference prompts repository (playbooks/OPENAI_TEXT_TO_SPEECH_INTEGRATION_PLAYBOOK.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_openai_text_to_speech_integration_playbook
+title: "OpenAI Text-to-Speech (TTS) - Convert text to audio with whisper voices"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for OpenAI Text-to-Speech (TTS) - Convert text to audio with whisper voices, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task calls a large language model API"
+  - "the task builds chat, completion, or conversation features"
+  - "the task uploads, stores, or serves user files or media"
+  - "the task builds search, retrieval, or embedding-backed features"
+  - "the task integrates OpenAI Text-to-Speech (TTS) - Convert text to audio with whisper voices"
+tags: [imported]
+content: imported/pb_openai_text_to_speech_integration_playbook.md

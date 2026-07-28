@@ -1,0 +1,18 @@
+# Imported from the reference prompts repository (playbooks/APPLE_AUTH_MOBILE.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_apple_auth_mobile
+title: "the platform Managed Apple Auth Login Playbook for Mobile/Expo React Native apps"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for the platform Managed Apple Auth Login Playbook for Mobile/Expo React Native apps, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task implements user sign-in, sign-up, or session handling"
+  - "the task touches authentication tokens, cookies, or an OAuth flow"
+  - "the task sends transactional or bulk email"
+  - "the task uploads, stores, or serves user files or media"
+  - "the task fetches financial or market data from a provider API"
+  - "the task integrates the platform Managed Apple Auth Login Playbook for Mobile/Expo React Native apps"
+tags: [imported]
+content: imported/pb_apple_auth_mobile.md

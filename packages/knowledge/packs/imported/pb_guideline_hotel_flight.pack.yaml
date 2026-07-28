@@ -1,0 +1,13 @@
+# Imported from the reference prompts repository (playbooks/Guideline-hotel-flight.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_guideline_hotel_flight
+title: "Guideline-Hotel-Flight"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Guideline-Hotel-Flight, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task integrates Guideline-Hotel-Flight"
+tags: [imported]
+content: imported/pb_guideline_hotel_flight.md

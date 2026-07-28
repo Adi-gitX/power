@@ -110,9 +110,29 @@ This is the only time you wait on the user. Everything after it runs unattended.
 
 ## 7. Build
 
-Dispatch `power:implementer` with the spec, the repository path, and the P0
-tasks. Give it the whole P0 slice, not one task at a time — it plans its own
-order and needs to see the shape of the work.
+**First, select capability packs.** The knowledge registry carries verified
+implementation guidance — integrations, design languages, infrastructure
+patterns — each pack stating the conditions under which it applies. Run:
+
+```
+KNOWLEDGE selector
+```
+
+(`KNOWLEDGE` means `node "${CLAUDE_PLUGIN_ROOT}/scripts/knowledge.mjs"`.) Read
+the catalogue it prints and match the spec's requirements against each pack's
+criteria — criteria, not titles, and a pack whose anti-criteria apply does not
+match. For each match, fetch the body with `KNOWLEDGE show <name>` and include
+it in the implementer's brief under a heading naming the pack. Expect zero to
+three matches for most goals; if nothing matches, say so in the dispatch so the
+implementer knows to build from first principles rather than wonder.
+
+A pack that `requires_secrets` the user has not configured is a match to
+*mention*, not to follow silently: the implementer must surface the missing
+configuration rather than invent values.
+
+Then dispatch `power:implementer` with the spec, the repository path, the P0
+tasks, and the selected pack bodies. Give it the whole P0 slice, not one task at
+a time — it plans its own order and needs to see the shape of the work.
 
 Where the spec's tasks are genuinely independent — separate modules with no
 shared files — dispatch several implementers concurrently, one per component,
@@ -137,6 +157,11 @@ same code and neither depends on the other's output.
 The reviewer writes `review.json`; it has no Bash, so its report will record that
 it could not run the suite. That is expected. The tester writes
 `test-report.json` and actually runs things.
+
+If capability packs were selected in step 7, pass the tester their
+`testing_instructions` (printed at the end of `KNOWLEDGE selector`) — a pack
+that shipped guidance also ships the checks that prove the guidance was
+followed.
 
 Then decide, from the two reports together:
 

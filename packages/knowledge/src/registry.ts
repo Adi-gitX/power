@@ -44,7 +44,19 @@ export function loadPacks(root: string): LoadedPacks {
     throw new PackError(`no packs directory at ${packsDir}`);
   }
 
-  const entries = readdirSync(packsDir);
+  // One level of nesting: hand-authored packs sit in `packs/`, generated
+  // imports in `packs/imported/`. Recursing exactly one level keeps the layout
+  // obvious while letting the importer own its directory wholesale.
+  const entries: string[] = [];
+  for (const entry of readdirSync(packsDir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      for (const nested of readdirSync(join(packsDir, entry.name))) {
+        entries.push(`${entry.name}/${nested}`);
+      }
+    } else {
+      entries.push(entry.name);
+    }
+  }
   const definitions = entries.filter((file) => file.endsWith('.pack.yaml')).sort();
 
   const packs: Pack[] = [];

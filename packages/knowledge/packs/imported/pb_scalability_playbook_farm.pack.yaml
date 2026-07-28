@@ -1,0 +1,14 @@
+# Imported from the reference prompts repository (playbooks/SCALABILITY_PLAYBOOK_FARM.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_scalability_playbook_farm
+title: "Scalability Playbook Farm"
+version: 1
+category: infrastructure
+owner: prompts-repo
+summary: "Integration guidance for Scalability Playbook Farm, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task uploads, stores, or serves user files or media"
+  - "the task integrates Scalability Playbook Farm"
+tags: [imported]
+content: imported/pb_scalability_playbook_farm.md

@@ -1,0 +1,16 @@
+# Imported from the reference prompts repository (playbooks/SENDGRID.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_sendgrid
+title: "Sendgrid"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Sendgrid, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task sends transactional or bulk email"
+  - "the task uploads, stores, or serves user files or media"
+  - "the task builds search, retrieval, or embedding-backed features"
+  - "the task integrates Sendgrid"
+tags: [imported]
+content: imported/pb_sendgrid.md

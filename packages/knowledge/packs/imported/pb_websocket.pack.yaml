@@ -1,0 +1,15 @@
+# Imported from the reference prompts repository (playbooks/WEBSOCKET.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_websocket
+title: "Websocket"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Websocket, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task uploads, stores, or serves user files or media"
+  - "the task needs a persistent connection or live updates between client and server"
+  - "the task integrates Websocket"
+tags: [imported]
+content: imported/pb_websocket.md

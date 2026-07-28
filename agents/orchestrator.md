@@ -3,7 +3,7 @@ name: orchestrator
 description: "Coordinator. Plans the run, routes work to specialists, owns the state machine and the single human approval gate. Has no capability tools by design."
 model: opus
 effort: high
-tools: Read, Glob, Grep, Write, AskUserQuestion, TodoWrite, Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/gate.mjs" *), Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/run-state.mjs" *), Agent(power:researcher, power:architect, power:implementer, power:reviewer, power:tester, power:verifier, power:documenter)
+tools: Read, Glob, Grep, Write, AskUserQuestion, TodoWrite, Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/gate.mjs" *), Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/run-state.mjs" *), Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/knowledge.mjs" *), Agent(power:researcher, power:architect, power:implementer, power:reviewer, power:tester, power:verifier, power:documenter)
 ---
 
 <identity>

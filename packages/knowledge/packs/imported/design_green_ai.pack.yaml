@@ -1,0 +1,16 @@
+# Imported from the reference prompts repository (playbooks/Guideline-green-ai.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: design_green_ai
+title: "Design language: green ai"
+version: 1
+category: design
+owner: prompts-repo
+summary: "A complete visual direction (green ai) — palette, type, spacing, and component treatments — imported from the reference design-guideline corpus."
+matching_criteria:
+  - "the task builds user-facing UI and the requested aesthetic matches: green ai"
+  - "the task asks for a designed front end rather than an unstyled scaffold"
+anti_criteria:
+  - "the task is a CLI, API, or library with no visual surface"
+tags: [imported]
+content: imported/design_green_ai.md

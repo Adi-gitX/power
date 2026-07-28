@@ -1,0 +1,17 @@
+# Imported from the reference prompts repository (playbooks/BAILEYS_WHATSAPP.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_baileys_whatsapp
+title: "Baileys Whatsapp"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Baileys Whatsapp, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task sends or receives messages on a chat or messaging platform"
+  - "the task uploads, stores, or serves user files or media"
+  - "the task needs a persistent connection or live updates between client and server"
+  - "the task builds search, retrieval, or embedding-backed features"
+  - "the task integrates Baileys Whatsapp"
+tags: [imported]
+content: imported/pb_baileys_whatsapp.md

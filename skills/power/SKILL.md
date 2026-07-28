@@ -11,6 +11,7 @@ allowed-tools:
   - TodoWrite
   - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/gate.mjs" *)
   - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/run-state.mjs" *)
+  - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/knowledge.mjs" *)
   - Bash(git *)
   - Bash(ls *)
   - Bash(cat .power/*)
@@ -87,6 +88,7 @@ was — the artifacts and the gate decide that.
   `review.json`, `test-report.json`, `verification.json`
 - Gate: `node "${CLAUDE_PLUGIN_ROOT}/scripts/gate.mjs" <stage>`
 - State: `node "${CLAUDE_PLUGIN_ROOT}/scripts/run-state.mjs" <command>`
+- Packs: `node "${CLAUDE_PLUGIN_ROOT}/scripts/knowledge.mjs" <selector|show>`
 
 `.power/` belongs to Power. The code the run produces belongs in the repository
 proper, exactly where it would live if a person had written it.

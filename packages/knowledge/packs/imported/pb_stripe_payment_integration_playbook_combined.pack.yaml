@@ -1,0 +1,16 @@
+# Imported from the reference prompts repository (playbooks/STRIPE_PAYMENT_INTEGRATION_PLAYBOOK_COMBINED.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_stripe_payment_integration_playbook_combined
+title: "Stripe Payment Integration Playbook for stripe sandbox and shared sandbox"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Stripe Payment Integration Playbook for stripe sandbox and shared sandbox, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task takes payment, manages subscriptions, or handles checkout"
+  - "the task integrates a payment provider or webhook for payment events"
+  - "the task shows maps, geocodes addresses, or works with place data"
+  - "the task integrates Stripe Payment Integration Playbook for stripe sandbox and shared sandbox"
+tags: [imported]
+content: imported/pb_stripe_payment_integration_playbook_combined.md

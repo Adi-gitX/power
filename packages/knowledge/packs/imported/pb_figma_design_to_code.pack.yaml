@@ -1,0 +1,15 @@
+# Imported from the reference prompts repository (playbooks/FIGMA_DESIGN_TO_CODE.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_figma_design_to_code
+title: "Figma Design to Code"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Figma Design to Code, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task shows maps, geocodes addresses, or works with place data"
+  - "the task uploads, stores, or serves user files or media"
+  - "the task integrates Figma Design to Code"
+tags: [imported]
+content: imported/pb_figma_design_to_code.md

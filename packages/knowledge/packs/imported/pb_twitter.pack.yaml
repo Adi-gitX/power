@@ -1,0 +1,17 @@
+# Imported from the reference prompts repository (playbooks/TWITTER.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_twitter
+title: "Twitter"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Twitter, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task implements user sign-in, sign-up, or session handling"
+  - "the task touches authentication tokens, cookies, or an OAuth flow"
+  - "the task sends transactional or bulk email"
+  - "the task builds search, retrieval, or embedding-backed features"
+  - "the task integrates Twitter"
+tags: [imported]
+content: imported/pb_twitter.md

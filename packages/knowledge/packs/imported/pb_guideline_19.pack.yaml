@@ -1,0 +1,13 @@
+# Imported from the reference prompts repository (playbooks/Guideline-19.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_guideline_19
+title: "Guideline-19"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Guideline-19, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task integrates Guideline-19"
+tags: [imported]
+content: imported/pb_guideline_19.md

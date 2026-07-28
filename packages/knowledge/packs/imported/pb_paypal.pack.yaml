@@ -1,0 +1,17 @@
+# Imported from the reference prompts repository (playbooks/PAYPAL.md).
+# Regenerate with `pnpm --filter @power/knowledge run import <source>` — do not hand-edit;
+# hand-authored changes belong in a new pack that `deprecates` this one.
+name: pb_paypal
+title: "Paypal"
+version: 1
+category: integration
+owner: prompts-repo
+summary: "Integration guidance for Paypal, imported from the reference playbook corpus."
+matching_criteria:
+  - "the task takes payment, manages subscriptions, or handles checkout"
+  - "the task integrates a payment provider or webhook for payment events"
+  - "the task uploads, stores, or serves user files or media"
+  - "the task builds search, retrieval, or embedding-backed features"
+  - "the task integrates Paypal"
+tags: [imported]
+content: imported/pb_paypal.md
