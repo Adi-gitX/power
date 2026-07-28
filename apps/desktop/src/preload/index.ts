@@ -14,6 +14,9 @@ const api = {
   reject: (reason: string): Promise<void> => ipcRenderer.invoke('power:reject', reason),
   stop: (): Promise<void> => ipcRenderer.invoke('power:stop'),
   hide: (): Promise<void> => ipcRenderer.invoke('power:hide-window'),
+  authStatus: (): Promise<{ cliFound: boolean; loggedIn: boolean; email?: string }> =>
+    ipcRenderer.invoke('power:auth-status'),
+  authLogin: (): Promise<boolean> => ipcRenderer.invoke('power:auth-login'),
   readArtifact: (repoDir: string, name: string): Promise<string | null> =>
     ipcRenderer.invoke('power:read-artifact', repoDir, name),
   onEvent: (handler: (event: unknown) => void): (() => void) => {

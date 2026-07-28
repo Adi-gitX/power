@@ -28,5 +28,30 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^5.7.2",
     "vite": "^7.1.0"
+  },
+  "build": {
+    "appId": "sh.emergent.power",
+    "productName": "Power",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**",
+      "resources/**",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "icon": "resources/icon.icns",
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    }
   }
 }

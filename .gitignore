@@ -15,3 +15,4 @@ next-env.d.ts
 
 # Electron
 apps/desktop/out/
+apps/desktop/release/

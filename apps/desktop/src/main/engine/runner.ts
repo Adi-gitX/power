@@ -60,7 +60,14 @@ export class PowerRun extends EventEmitter {
 
   private exec(cmd: string, args: string[], onLine?: (line: string) => void): Promise<string> {
     return new Promise((resolve, reject) => {
-      const child = spawn(cmd, args, { cwd: this.opts.repoDir });
+      // `node` runs as ourselves: under Electron, execPath + ELECTRON_RUN_AS_NODE
+      // is a plain node, so a Finder-launched app (PATH=/usr/bin:/bin) needs no
+      // node installed on PATH. Under vitest execPath already is node.
+      const viaSelf = cmd === 'node';
+      const child = spawn(viaSelf ? process.execPath : cmd, args, {
+        cwd: this.opts.repoDir,
+        env: viaSelf ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' } : process.env,
+      });
       let out = '';
       const feed = (chunk: Buffer) => {
         const text = chunk.toString();

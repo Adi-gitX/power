@@ -24,13 +24,48 @@ import {
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 import { join, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { PowerRun, readArtifact } from './engine/runner.js';
 import type { RunEvent } from './engine/types.js';
 
-/** The plugin root: scripts/, agents/, packages/. Overridable for packaging. */
-const POWER_ROOT =
-  process.env.POWER_ROOT ?? resolve(app.getAppPath(), '..', '..');
+// A Finder-launched app inherits PATH=/usr/bin:/bin — the `claude` CLI lives
+// in homebrew's prefix, so extend PATH before anything spawns.
+process.env.PATH = [
+  process.env.PATH ?? '',
+  '/opt/homebrew/bin',
+  '/usr/local/bin',
+  join(app.getPath('home'), '.local', 'bin'),
+].join(':');
+
+/**
+ * The Power repo root: scripts/, agents/, packages/. In dev the app lives at
+ * <root>/apps/desktop so two levels up is right; packaged, getAppPath() is
+ * inside the .app bundle, so fall back to a config file and then the standard
+ * location. First candidate that actually contains the state script wins.
+ */
+function resolvePowerRoot(): string {
+  const candidates = [
+    process.env.POWER_ROOT,
+    (() => {
+      try {
+        const cfg = JSON.parse(
+          readFileSync(join(app.getPath('home'), '.power-desktop.json'), 'utf8'),
+        ) as { powerRoot?: string };
+        return cfg.powerRoot;
+      } catch {
+        return undefined;
+      }
+    })(),
+    resolve(app.getAppPath(), '..', '..'),
+    join(app.getPath('home'), 'Library', 'power'),
+  ];
+  for (const c of candidates) {
+    if (c && existsSync(join(c, 'scripts', 'run-state.mjs'))) return c;
+  }
+  return candidates[candidates.length - 1]!;
+}
+const POWER_ROOT = resolvePowerRoot();
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -207,6 +242,38 @@ app.whenReady().then(() => {
   );
 
   ipcMain.handle('power:hide-window', () => win?.hide());
+
+  /**
+   * The Claude connection, VSCode-extension style: the app neither stores nor
+   * sees a credential. `claude auth status` reports the CLI's own login (the
+   * user's claude.ai account), and sign-in just runs the CLI's OAuth flow —
+   * the browser opens, the user approves, the CLI keeps the token in its own
+   * keychain. The app is a client of that session, never a custodian.
+   */
+  ipcMain.handle('power:auth-status', async () => {
+    return await new Promise((resolveStatus) => {
+      const child = spawn('claude', ['auth', 'status'], { env: process.env });
+      let out = '';
+      child.stdout.on('data', (c: Buffer) => (out += c.toString()));
+      child.on('error', () => resolveStatus({ cliFound: false, loggedIn: false }));
+      child.on('close', () => {
+        try {
+          const parsed = JSON.parse(out) as { loggedIn?: boolean; email?: string };
+          resolveStatus({ cliFound: true, loggedIn: !!parsed.loggedIn, email: parsed.email });
+        } catch {
+          resolveStatus({ cliFound: true, loggedIn: false });
+        }
+      });
+    });
+  });
+
+  ipcMain.handle('power:auth-login', async () => {
+    return await new Promise((resolveLogin) => {
+      const child = spawn('claude', ['auth', 'login'], { env: process.env });
+      child.on('error', () => resolveLogin(false));
+      child.on('close', (code) => resolveLogin(code === 0));
+    });
+  });
 
   createWindow();
   createTray();
