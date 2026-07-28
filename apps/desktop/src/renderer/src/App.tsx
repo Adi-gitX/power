@@ -250,8 +250,12 @@ export default function App() {
             }}
           />
           {/* ——— Sidebar: a floating panel, Perplexity-style ——— */}
-          <aside className="titlebar-drag flex w-64 shrink-0 flex-col border-r border-hairline bg-panel/60">
-            <div className="h-12 shrink-0" />
+          <aside className="flex w-64 shrink-0 flex-col border-r border-hairline bg-panel/60">
+            <div className="titlebar-drag flex h-12 shrink-0 items-center pl-[78px]">
+              <span className="font-mono text-[13px] font-semibold tracking-tight text-ink">
+                power<span className="text-accent-soft">/</span>
+              </span>
+            </div>
             <div className="flex flex-col gap-0.5 px-3">
               <button
                 type="button"
@@ -319,7 +323,43 @@ export default function App() {
 
           {/* ——— Main pane ——— */}
           <main className="relative flex min-w-0 flex-1 flex-col">
-            <div className="titlebar-drag h-12 shrink-0" />
+            <div className="titlebar-drag flex h-12 shrink-0 items-center gap-2.5 border-b border-hairline px-4">
+              {view === 'run' ? (
+                <>
+                  <span
+                    aria-hidden="true"
+                    className={`h-2 w-2 shrink-0 rounded-full ${
+                      blocked
+                        ? 'bg-accent-soft'
+                        : done
+                          ? 'bg-emerald-400'
+                          : 'animate-pulse bg-accent-soft'
+                    }`}
+                  />
+                  <span className="truncate text-[13px] font-medium text-ink">{goal}</span>
+                  {repo && (
+                    <span className="hidden shrink-0 rounded-md border border-hairline bg-canvas/60 px-2 py-0.5 font-mono text-[11px] text-mutedtext md:block">
+                      {repo.split('/').slice(-1)[0]}
+                    </span>
+                  )}
+                  <span className="shrink-0 text-[12px] text-mutedtext">
+                    {blocked ? 'blocked' : done ? 'complete' : 'running'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setView('home');
+                      setGoal('');
+                    }}
+                    className="ml-auto shrink-0 rounded-md border border-hairline bg-panel px-2.5 py-1 text-[12px] font-medium text-bodytext transition-colors hover:bg-raised hover:text-ink"
+                  >
+                    New Session ⌘N
+                  </button>
+                </>
+              ) : (
+                <span className="ml-auto text-[11px] text-mutedtext/70">⌘⇧Space · Esc</span>
+              )}
+            </div>
 
             {view === 'home' && (
               <div className="flex flex-1 flex-col items-center justify-center gap-10 px-10 pb-24">
