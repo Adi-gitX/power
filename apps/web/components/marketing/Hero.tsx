@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 import { useState } from 'react';
 import { GhostButton, PaperButton } from './Buttons';
 import { PHRASES } from './hero-content';
-import { useAnimatedHero, type HeroProgress } from './HeroAnimation';
+import { LINE_RISE_PX, useAnimatedHero, type HeroProgress } from './HeroAnimation';
 import { SITE } from '@/lib/site';
 
 /**
@@ -42,9 +42,7 @@ const HeroAnimation = dynamic(
  */
 export function Hero() {
   const animated = useAnimatedHero();
-  const [progress, setProgress] = useState<HeroProgress>({ composed: 1, visible: 1 });
-  const composed = animated ? progress.composed : 1;
-  const visible = animated ? progress.visible : 1;
+  const [progress, setProgress] = useState<HeroProgress>({ lines: [1, 1, 1] });
 
   return (
     <section
@@ -53,52 +51,48 @@ export function Hero() {
       // No background of its own. The page's ambient glow shows through, so the
       // hero and everything after it are one uninterrupted surface — a photo
       // here would put a hard edge exactly where the seam must not be.
-      // 320vh, not the reference's 700vh. That number was tuned for a sequence
-      // with images interleaved between the phrases; with three short lines and
-      // nothing else, seven screens of scroll-jacking to read nine words is a
-      // reason to leave rather than an effect. Three screens is enough to carry
-      // the phrases across and still let the composed heading hold at the end.
-      className="relative min-h-screen text-ink md:h-[320vh]"
+      //
+      // 700vh, the reference's own pin length, kept verbatim by request. The
+      // travel geometry (flat 150-unit gaps plus a len*0.3 tail) is tuned
+      // against exactly this scroll distance; shortening one without the other
+      // rushes the train.
+      className="relative min-h-screen text-ink md:h-[700vh]"
     >
-      <div
-        className="sticky top-0 flex h-screen items-center justify-center overflow-hidden"
-        style={{ opacity: visible }}
-      >
+      <div className="sticky top-0 flex h-screen items-center justify-center overflow-hidden">
         {animated && <HeroAnimation onProgress={setProgress} />}
 
         {/*
           The real heading, always in the DOM and always in the same place. When
-          the animation runs it fades up as the moving text resolves; otherwise
-          it simply is the hero. Either way this is the markup a crawler indexes.
+          the animation runs it resolves over the last 18% of the scroll with the
+          reference's exact per-line effect — each line fading in as it rises its
+          final 22px, staggered 0.13 apart — and the sticky container then
+          releases and scrolls away with the section, which is the reference's
+          pin release. Without the animation it simply is the hero. Either way
+          this is the markup a crawler indexes.
         */}
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6">
           <div className="flex flex-col items-start gap-3 sm:gap-4">
             <h1 className="sr-only">
               {SITE.name} — {SITE.tagline}
             </h1>
-            {/*
-              Each line rises out of its own mask as the composition takes over,
-              instead of the whole block fading in at once. Staggering the three
-              across the handover turns a state change into a sentence being
-              spoken. Driven from scroll progress rather than a tween, so
-              scrubbing backwards runs it backwards.
-            */}
             {PHRASES.map((phrase, i) => {
-              const local = Math.min(1, Math.max(0, (composed - i * 0.16) / 0.52));
+              const local = animated ? (progress.lines[i] ?? 0) : 1;
               return (
-                <span key={phrase} className="block overflow-hidden pb-[0.08em]">
-                  <span
-                    aria-hidden="true"
-                    className="display block text-5xl leading-[1.05] text-ink sm:text-7xl lg:text-[5.5rem]"
-                    style={
-                      animated
-                        ? { transform: `translateY(${(1 - local) * 110}%)`, opacity: local }
-                        : undefined
-                    }
-                  >
-                    {phrase}
-                  </span>
-                </span>
+                <p
+                  key={phrase}
+                  aria-hidden="true"
+                  className="display text-5xl leading-[1.05] text-ink sm:text-7xl lg:text-[5.5rem]"
+                  style={
+                    animated
+                      ? {
+                          opacity: local,
+                          transform: `translateY(${(1 - local) * LINE_RISE_PX}px)`,
+                        }
+                      : undefined
+                  }
+                >
+                  {phrase}
+                </p>
               );
             })}
           </div>

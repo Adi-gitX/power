@@ -30,55 +30,36 @@ const WAVE_D =
 const FLAT_D = 'M0 195H644H1288H1932H2576';
 
 /**
- * Gap between phrases, as a fraction of the path length.
+ * The reference implementation's numbers, kept verbatim by request.
  *
- * The reference alternated text with 300-unit logo images and used a flat 150,
- * which reads as generous when something sits in the gap. With three phrases and
- * nothing between them, 150 units is about 84px on screen: the next phrase
- * arrives before the previous one has left, and the hero opens on
- * "You describe.  A". Spacing by path length instead keeps one phrase on screen
- * at a time at any viewport width.
+ * `SPACING` is the flat 150-unit gap the reference puts between segments on the
+ * path, so the phrases run as one continuous train the way its text-logo-text
+ * sequence did. The composed reveal owns the final 18% of the scroll
+ * (`FADE_START = 0.82`), each line starting `STAGGER_PER_LINE` into the fade and
+ * resolving over a `LINE_WINDOW`, rising `LINE_RISE_PX` as it arrives — all four
+ * values lifted directly from the reference's final-reveal loop.
+ *
+ * The overlap bug fixed earlier is not reintroduced by returning to the
+ * reference timing. That bug came from *my* re-timing, which started the
+ * composition at mid-scroll while phrases were still mid-sweep. In the
+ * reference geometry the travel distance includes a `len * 0.3` tail, so by
+ * 0.82 the last phrase has left the path and the cross-fade happens over an
+ * essentially empty stage.
  */
-const SPACING_RATIO = 0.75;
-
-/**
- * The handover, as fractions of the hero's scroll.
- *
- * These are **sequenced, not cross-faded**, and that is the whole point. A
- * cross-fade sounds right and looks wrong: for the middle of it both layers sit
- * at around half opacity, and the moving line — one phrase, the full width of
- * the screen — cuts straight through the three stacked lines of the composed
- * heading. The result is unreadable mush that no amount of easing fixes,
- * because the two states are simply different pictures.
- *
- * So the moving text is gone before the composition begins. `HANDOFF` is where
- * the last phrase has cleared the path and the SVG has faded to nothing;
- * `COMPOSE_START` is deliberately after it, leaving a beat of empty canvas
- * between the two. The gap reads as intentional — the sentence finishes, then
- * the statement arrives.
- */
-const SWEEP_OUT = 0.52;
-const HANDOFF = 0.62;
-const COMPOSE_START = 0.66;
-const COMPOSE_END = 0.82;
-
-/**
- * When the whole hero fades out, as a fraction of its scroll.
- *
- * Without this the hero is still on screen while the next section scrolls up
- * underneath it, and the two overlap — the heading and the buttons sit on top of
- * the next heading for the last stretch of the section. A hero with its own
- * background hides that; this one is transparent by design, so it has to
- * actually leave. Between `FADE_END` and here the composition simply holds,
- * which is the beat that makes it feel finished rather than interrupted.
- */
-const EXIT_START = 0.9;
+const SPACING = 150;
+const FADE_START = 0.82;
+const FADE_WINDOW = 0.18;
+const STAGGER_PER_LINE = 0.13;
+const LINE_WINDOW = 0.45;
+export const LINE_RISE_PX = 22;
 
 export interface HeroProgress {
-  /** 0 while the moving text owns the screen, 1 once the composition has taken over. */
-  composed: number;
-  /** 1 while the hero is on screen, 0 once it has cleared for the next section. */
-  visible: number;
+  /**
+   * Per-line opacity for the composed reveal, computed with the reference's own
+   * stagger so the parent applies exactly the effect it shipped: line i starts
+   * at `i * STAGGER_PER_LINE` into the fade and resolves over `LINE_WINDOW`.
+   */
+  lines: number[];
 }
 
 export function HeroAnimation({ onProgress }: { onProgress?: (p: HeroProgress) => void }) {
@@ -98,19 +79,16 @@ export function HeroAnimation({ onProgress }: { onProgress?: (p: HeroProgress) =
       const widthOf = (el: SVGTextElement) => el.getComputedTextLength() || 1800;
       const widths = segEls.map(widthOf);
 
-      // Centre the first phrase in the path so it is legible before any scroll.
-      const spacing = len * SPACING_RATIO;
+      // The reference's layout, verbatim: centre the opening phrase, then chain
+      // the rest at a flat gap, with a len*0.3 tail so the train fully clears
+      // the path before the reveal window opens.
       const base = Math.max(40, (len - widths[0]!) / 2);
       const starts: number[] = [];
       segEls.forEach((_, i) => {
-        starts[i] = i === 0 ? base : starts[i - 1]! + widths[i - 1]! + spacing;
+        starts[i] = i === 0 ? base : starts[i - 1]! + widths[i - 1]! + SPACING;
       });
-      // Scale the travel so the last phrase has cleared the path exactly as the
-      // cross-fade completes. Otherwise text is still sliding underneath a
-      // heading that has already faded in on top of it.
       const last = segEls.length - 1;
-      const travel = starts[last]! + widths[last]! + len * 0.08;
-      const headEnd = travel / HANDOFF;
+      const headEnd = starts[last]! + widths[last]! + len * 0.3;
 
       const morphTween = gsap.to(line, {
         duration: 1,
@@ -141,16 +119,14 @@ export function HeroAnimation({ onProgress }: { onProgress?: (p: HeroProgress) =
           el.style.opacity = onPath ? '1' : '0';
         });
 
-        // Sequenced handover. The SVG is fully out at HANDOFF; the composition
-        // does not start until COMPOSE_START. They never share the screen.
-        if (svgRef.current) {
-          svgRef.current.style.opacity = String(
-            1 - clamp01((prog - SWEEP_OUT) / (HANDOFF - SWEEP_OUT)),
-          );
-        }
+        // The reference's final reveal: the path fades over the last 18% while
+        // each composed line resolves on its own staggered sub-window.
+        const fade = clamp01((prog - FADE_START) / FADE_WINDOW);
+        if (svgRef.current) svgRef.current.style.opacity = String(1 - fade);
         onProgress?.({
-          composed: clamp01((prog - COMPOSE_START) / (COMPOSE_END - COMPOSE_START)),
-          visible: 1 - clamp01((prog - EXIT_START) / (1 - EXIT_START)),
+          lines: segEls.map((_, i) =>
+            clamp01((fade - i * STAGGER_PER_LINE) / LINE_WINDOW),
+          ),
         });
       };
 
