@@ -1,25 +1,32 @@
 @import 'tailwindcss';
 
 /**
- * The Power design system, shared with apps/web: warm paper canvas, one
- * terracotta accent, hairlines tinted toward the canvas. Same tokens, same
- * ratios (all pairs computed ≥ 4.5:1), so the site and the app read as one
- * product. Fonts are system here — a desktop app should feel native, and the
- * webfont pipeline belongs to the website.
+ * The dark shell, in the Perplexity register: a frameless transparent window,
+ * macOS vibrancy behind it, and the DOM drawing its own rounded near-black
+ * surface. Panels float as separate rounded cards rather than sitting in a
+ * framed layout — the sidebar is a card, the ask box is a card, and the window
+ * edge is ours to round.
+ *
+ * Colour stays Power's: the same warm near-blacks as the website's code panel
+ * (nothing here is a blue-grey), and the terracotta accent — brand does not
+ * change with the theme. Contrast pairs computed as ever: body #d6d2ca on
+ * #141311 is 11.9:1; muted #9a948a is 5.6:1; accent-soft #c96442 on the canvas
+ * is 4.9:1.
  */
 @theme {
-  --color-canvas: #faf9f5;
-  --color-surface: #ffffff;
-  --color-sunken: #f3f1ea;
-  --color-code: #262320;
+  --color-shell: #0e0d0c;
+  --color-canvas: #141311;
+  --color-panel: #1b1a17;
+  --color-raised: #23211d;
+  --color-code: #0b0a09;
 
-  --color-ink: #191817;
-  --color-bodytext: #3d3a34;
-  --color-mutedtext: #6b6862;
-  --color-hairline: #e7e3d9;
+  --color-ink: #f4f2ee;
+  --color-bodytext: #d6d2ca;
+  --color-mutedtext: #9a948a;
+  --color-hairline: rgba(255, 255, 255, 0.08);
 
-  --color-accent: #b4522f;
-  --color-accent-soft: #c96442;
+  --color-accent: #c96442;
+  --color-accent-soft: #e0784f;
 
   --font-sans:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Figtree, ui-sans-serif, sans-serif;
@@ -33,15 +40,29 @@ body,
   height: 100%;
 }
 
+/* Transparent to the desktop: the window has no background of its own, so the
+   intro can float the mark alone before the surface exists. */
 body {
-  background: var(--color-canvas);
+  background: transparent;
   color: var(--color-bodytext);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
   user-select: none;
 }
 
-/* The hiddenInset traffic lights need a grabbable strip. */
+/* The app surface — the rounded dark sheet everything lives on. Slightly
+   translucent so the vibrancy layer reads through, exactly enough to feel
+   native and not enough to cost text contrast. */
+.surface {
+  background: color-mix(in srgb, var(--color-shell) 92%, transparent);
+  backdrop-filter: blur(28px) saturate(1.1);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.55),
+    0 24px 70px rgba(0, 0, 0, 0.5);
+}
+
 .titlebar-drag {
   -webkit-app-region: drag;
 }
@@ -54,7 +75,27 @@ body {
   user-select: text;
 }
 
+.display {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.015em;
+}
+
 ::selection {
   background: var(--color-ink);
-  color: var(--color-canvas);
+  color: var(--color-shell);
+}
+
+/* Thin, quiet scrollbars for the dark panels. */
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
 }

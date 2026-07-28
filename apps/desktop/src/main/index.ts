@@ -8,8 +8,13 @@
  * long unattended run needs to reach you.
  */
 import { app, BrowserWindow, dialog, ipcMain, Notification } from 'electron';
+
+// The intro chime is synthesized in the renderer on launch; without this,
+// Chromium's autoplay policy silences audio that no click preceded.
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 import { join, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { PowerRun, readArtifact } from './engine/runner.js';
 import type { RunEvent } from './engine/types.js';
 
@@ -26,13 +31,21 @@ function notify(title: string, body: string): void {
 
 function createWindow(): void {
   win = new BrowserWindow({
-    width: 1180,
-    height: 800,
-    minWidth: 900,
-    minHeight: 620,
+    width: 1240,
+    height: 820,
+    minWidth: 960,
+    minHeight: 640,
     title: 'Power',
+    // The Perplexity-style shell: no frame chrome, a fully transparent window,
+    // and macOS vibrancy behind it. The DOM draws its own rounded dark surface,
+    // which is what lets the intro float the mark alone over the desktop before
+    // the surface fades in.
     titleBarStyle: 'hiddenInset',
-    backgroundColor: '#faf9f5',
+    trafficLightPosition: { x: 16, y: 16 },
+    transparent: true,
+    vibrancy: 'under-window',
+    visualEffectState: 'active',
+    backgroundColor: '#00000000',
     webPreferences: {
       preload: join(app.getAppPath(), 'out', 'preload', 'index.js'),
       contextIsolation: true,
@@ -48,7 +61,25 @@ function createWindow(): void {
   }
 }
 
+/** Recent runs, for the sidebar. One JSON file in userData; newest first. */
+function historyPath(): string {
+  return join(app.getPath('userData'), 'runs.json');
+}
+function readHistory(): unknown[] {
+  try {
+    return JSON.parse(readFileSync(historyPath(), 'utf8'));
+  } catch {
+    return [];
+  }
+}
+function recordRun(entry: Record<string, unknown>): void {
+  const rows = [entry, ...readHistory()].slice(0, 50);
+  writeFileSync(historyPath(), JSON.stringify(rows, null, 2));
+}
+
 app.whenReady().then(() => {
+  ipcMain.handle('power:history', () => readHistory());
+
   ipcMain.handle('power:pick-repo', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
@@ -91,6 +122,7 @@ app.whenReady().then(() => {
       if (e.type === 'done') notify('Power — run complete', 'All gates passed.');
     });
 
+    recordRun({ goal, repoDir, at: new Date().toISOString() });
     void activeRun.run().finally(() => {
       activeRun = null;
     });

@@ -6,6 +6,8 @@ import { contextBridge, ipcRenderer } from 'electron';
  */
 const api = {
   pickRepo: (): Promise<string | null> => ipcRenderer.invoke('power:pick-repo'),
+  history: (): Promise<{ goal: string; repoDir: string; at: string }[]> =>
+    ipcRenderer.invoke('power:history'),
   startRun: (repoDir: string, goal: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('power:start-run', repoDir, goal),
   approve: (): Promise<void> => ipcRenderer.invoke('power:approve'),
