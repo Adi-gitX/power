@@ -83,6 +83,16 @@ html {
   color-scheme: light;
 }
 
+/*
+ * Anchor targets stop below the floating nav rather than under it. Without this
+ * every link in the nav scrolls its own heading out of sight, which is a
+ * particularly annoying bug because the page looks like it simply jumped to the
+ * wrong place.
+ */
+section[id] {
+  scroll-margin-top: 6rem;
+}
+
 body {
   position: relative;
   background-color: var(--color-canvas);

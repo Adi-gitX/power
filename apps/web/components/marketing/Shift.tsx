@@ -18,7 +18,7 @@ const FLOW = [
 
 export function Shift() {
   return (
-    <section className="mx-auto max-w-5xl px-5 py-20 text-center sm:px-8">
+    <section id="why" className="mx-auto max-w-5xl px-5 py-20 text-center sm:px-8">
       <Reveal>
         <h2 className="mx-auto max-w-2xl display text-3xl text-ink sm:text-[2.6rem]">
           The work is not writing the code. It is trusting it.

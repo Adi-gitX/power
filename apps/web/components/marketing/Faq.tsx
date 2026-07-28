@@ -75,7 +75,7 @@ const FAQS = [
 
 export function Faq() {
   return (
-    <section className="mx-auto max-w-3xl px-5 py-20 sm:px-8">
+    <section id="faq" className="mx-auto max-w-3xl px-5 py-20 sm:px-8">
       <Reveal>
         <h2 className="text-center display text-3xl text-ink sm:text-[2.6rem]">
           Frequently asked questions

@@ -41,7 +41,7 @@ const TILES = [
 
 export function Capabilities() {
   return (
-    <section className="mx-auto max-w-5xl px-5 py-20 text-center sm:px-8">
+    <section id="capabilities" className="mx-auto max-w-5xl px-5 py-20 text-center sm:px-8">
       <Reveal>
         <h2 className="mx-auto max-w-xl display text-3xl text-ink sm:text-[2.6rem]">
           Autonomy you can leave alone

@@ -20,7 +20,7 @@ const STEPS = [
 
 export function HowItWorks() {
   return (
-    <section className="mx-auto max-w-5xl px-5 py-20 text-center sm:px-8">
+    <section id="how" className="mx-auto max-w-5xl px-5 py-20 text-center sm:px-8">
       <Reveal>
         <h2 className="mx-auto max-w-2xl display text-3xl text-ink sm:text-[2.6rem]">
           Three steps, one of them yours
