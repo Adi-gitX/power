@@ -99,6 +99,41 @@ describe('broken spec', () => {
     expect(error?.detail).toContain('Build the webhook receiver');
   });
 
+  /**
+   * Found by a real architect writing a real spec, not by a fixture.
+   *
+   * The task scanner was line-anchored, so wrapping a bullet at eighty columns
+   * put its trailing `(R3)` on a continuation line the gate could not see — and
+   * it rejected a task that cited its requirement perfectly well. A false
+   * positive is the worst shape a gate bug can take: it fails correct work,
+   * spends a counted retry, and sends an agent to fix something that was never
+   * broken.
+   */
+  describe('a task whose citation wraps onto a continuation line', () => {
+    const SPEC = read('golden', 'SPEC.md');
+
+    it('is accepted, because a list item is not one line', () => {
+      const wrapped = SPEC.replace(
+        /^([ \t]*[-*+][ \t]+)(.*?)[ \t]+(\(R\d+\).*)$/m,
+        '$1$2\n  $3',
+      );
+      expect(wrapped, 'the fixture must contain a citation to wrap').not.toBe(SPEC);
+
+      const result = runGate('spec', { 'SPEC.md': wrapped });
+      const missing = result.errors.filter((e) => e.rule === 'tasks.missing_requirement_ref');
+      expect(missing).toEqual([]);
+    });
+
+    it('still catches a task that genuinely cites nothing, wrapped or not', () => {
+      const withUncited = SPEC.replace(
+        /^(#+[ \t]*Tasks[ \t]*)$/im,
+        '$1\n\n- Do a thing with no citation at all\n  spread across two lines',
+      );
+      const result = runGate('spec', { 'SPEC.md': withUncited });
+      expect(result.errors.some((e) => e.rule === 'tasks.missing_requirement_ref')).toBe(true);
+    });
+  });
+
   it('flags a task citing a requirement that does not exist', () => {
     const error = result.errors.find((e) => e.rule === 'tasks.unknown_requirement_ref');
     expect(error?.detail).toContain('R9');

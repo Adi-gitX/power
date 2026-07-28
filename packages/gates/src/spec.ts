@@ -29,7 +29,42 @@ const HEADING = /^(#{1,6})[ \t]+(.+?)[ \t]*$/gm;
 const EARS = /\bWHEN\b[\s\S]{3,400}?\bTHE SYSTEM SHALL\b/i;
 const REQUIREMENT_HEADING = /^(R\d+)\b/i;
 const REQUIREMENT_ID = /\bR\d+\b/g;
-const LIST_ITEM = /^[ \t]*(?:[-*+]|\d+\.)[ \t]+(.*)$/gm;
+const LIST_ITEM_START = /^[ \t]*(?:[-*+]|\d+\.)[ \t]+/;
+
+/**
+ * Collect list items, folding continuation lines into the item they belong to.
+ *
+ * A markdown list item is not one line. Wrap a task at eighty columns and its
+ * trailing `(R3)` lands on the next line, which a line-anchored regex does not
+ * see — so the gate rejected a task that cited its requirement perfectly well.
+ *
+ * That is the worst shape a gate bug can take. A false negative lets one bad
+ * artifact through; a false positive like this one rejects correct work, burns a
+ * counted retry, and sends the agent off to fix something that was never wrong.
+ * Found by an architect writing a real spec, which is exactly the class of thing
+ * fixtures written alongside the validator will never surface.
+ */
+function listItems(section: string): string[] {
+  const items: string[] = [];
+  let current: string[] | null = null;
+
+  for (const line of section.split(/\r?\n/)) {
+    if (LIST_ITEM_START.test(line)) {
+      if (current) items.push(current.join(' '));
+      current = [line.replace(LIST_ITEM_START, '')];
+    } else if (current && /^[ \t]+\S/.test(line)) {
+      // Indented and non-empty: a continuation of the item above.
+      current.push(line.trim());
+    } else if (current && line.trim() === '') {
+      // A blank line ends a loose item rather than splitting it.
+      items.push(current.join(' '));
+      current = null;
+    }
+  }
+  if (current) items.push(current.join(' '));
+
+  return items.map((i) => i.trim()).filter(Boolean);
+}
 
 interface Heading {
   level: number;
@@ -180,7 +215,7 @@ export function lintSpecBody(body: string, requirementIds: readonly string[]): G
   const tasksIndex = headings.findIndex((h) => h.text === 'tasks');
   if (tasksIndex !== -1) {
     const tasksSection = sectionBody(body, headings, tasksIndex);
-    const items = [...tasksSection.matchAll(LIST_ITEM)].map((m) => m[1]!.trim()).filter(Boolean);
+    const items = listItems(tasksSection);
 
     if (items.length === 0) {
       errors.push({
