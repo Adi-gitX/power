@@ -21,3 +21,28 @@ tools:
       - { name: grep, enabled: true }
       - { name: web_search, enabled: true }
       - { name: web_fetch, enabled: true }
+
+# The only agent granted web access, in either profile.
+plugin:
+  name: researcher
+  model: sonnet
+  tools:
+    - Read
+    - Glob
+    - Grep
+    - Write
+    - WebSearch
+    - WebFetch
+  core_blocks:
+    - identity
+    - workflow
+    - research_json_schema
+    - never_do
+    - critical_rules
+  reference_hints:
+    lenses: when deciding what to investigate
+    domain_lenses: when the goal touches a regulated or specialised domain
+    search_strategy: before starting retrieval
+    source_tiering: when weighing how much to trust a source
+    contradictory_sources: when two sources disagree
+    research_md: when writing the readable companion to research.json

@@ -1,0 +1,24 @@
+{
+  "name": "power",
+  "owner": {
+    "name": "Adithya Kammati",
+    "email": "adithya.k@emergent.sh"
+  },
+  "plugins": [
+    {
+      "name": "power",
+      "version": "0.1.0",
+      "description": "An autonomous AI engineering team that runs inside your own Claude Code session, with deterministic gates at every stage boundary.",
+      "source": "./",
+      "category": "development",
+      "keywords": [
+        "agents",
+        "orchestration",
+        "autonomous",
+        "multi-agent",
+        "code-generation",
+        "verification"
+      ]
+    }
+  ]
+}

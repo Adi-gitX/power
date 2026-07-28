@@ -26,3 +26,31 @@ tools:
           type: string
           enum: [research, spec, verification]
       required: [stage]
+
+# `ears_in_depth` stays inline: the spec gate checks for at least one EARS
+# acceptance criterion per requirement, so getting that format right is the
+# difference between passing the gate and burning a retry.
+plugin:
+  name: architect
+  model: opus
+  tools:
+    - Read
+    - Glob
+    - Grep
+    - Write
+    - WebSearch
+    - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/gate.mjs" *)
+  core_blocks:
+    - identity
+    - workflow
+    - spec_structure
+    - ears_in_depth
+    - never_do
+    - critical_rules
+  reference_hints:
+    requirements_worked_example: when writing the requirements section
+    non_functional_requirements: when specifying performance, security, or scale
+    data_model_and_interfaces: when defining schemas or API contracts
+    task_decomposition: when breaking the spec into P0/P1/P2 tasks
+    gate_failures: when the spec gate rejects the spec
+    needs_more_research: when the research does not answer a question the spec needs

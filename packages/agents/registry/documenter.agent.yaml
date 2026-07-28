@@ -19,3 +19,31 @@ tools:
       - { name: glob, enabled: true }
       - { name: grep, enabled: true }
       - { name: bash, enabled: true }
+
+# Bash is essential here rather than incidental: this agent's claims are claims
+# about what happens when you run things, and the only way they are true is if it
+# ran them. It has Edit too, which makes it the one agent that could "fix" the
+# code to match the docs — hence the hard rule against that in its prompt.
+plugin:
+  name: documenter
+  model: sonnet
+  tools:
+    - Read
+    - Glob
+    - Grep
+    - Write
+    - Edit
+    - Bash
+  core_blocks:
+    - identity
+    - code_over_spec
+    - audience_and_voice
+    - readme_structure
+    - workflow
+    - never_do
+    - critical_rules
+  reference_hints:
+    adrs: when recording an architectural decision
+    interface_documentation: when documenting an API or CLI surface
+    verifying_commands: before writing any command into the docs
+    what_not_to_document: when deciding whether something belongs in the docs

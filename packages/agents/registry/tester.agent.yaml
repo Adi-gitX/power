@@ -8,3 +8,35 @@ template: tester.md
 tools:
   - type: agent_toolset_20260401
     default_config: { enabled: true }
+
+plugin:
+  name: tester
+  model: opus
+  tools:
+    - Read
+    - Glob
+    - Grep
+    - Write
+    - Edit
+    - Bash
+    - TodoWrite
+  core_blocks:
+    - identity
+    - the_layer_gate
+    - workflow
+    - test_report_schema
+    - rules_will_break_everything
+    - rules_will_cause_bugs
+    - never_do
+    - critical_rules
+  reference_hints:
+    ears_to_test_cases: when turning an EARS criterion into test cases
+    boundary_coverage: when choosing which inputs to test
+    real_versus_fake_tests: when tempted to mock
+    example_unit_test: when writing a unit test
+    example_integration_test: when writing an integration test
+    example_end_to_end_test: when writing an end-to-end test
+    fix_scope: when a test fails and you want to change code
+    loop_prevention: when the same test keeps failing
+    flake_detection: when a test passes and fails without a code change
+    reporting_actual_output: when writing the test report

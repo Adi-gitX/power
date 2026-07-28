@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js';
 import { lintSpecBody, parseSpec } from './spec.js';
-import { STAGES, type GateError, type GateResult, type Stage } from './types.js';
+import { STAGES, isStage, type GateError, type GateResult, type Stage } from './types.js';
 
 export * from './types.js';
 export { REQUIRED_SECTIONS, lintSpecBody, parseSpec } from './spec.js';
@@ -220,4 +220,4 @@ export function runGate(stage: Stage, artifacts: Artifacts): GateResult {
   return { stage, pass: errors.length === 0, errors };
 }
 
-export { STAGES };
+export { STAGES, isStage };

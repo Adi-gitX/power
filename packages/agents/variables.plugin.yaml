@@ -1,0 +1,17 @@
+# Build-time variables for the `plugin` profile — Power running as a Claude Code
+# plugin inside the user's own session.
+#
+# The workspace is the repository the session is open in, not a provisioned
+# sandbox, and the artifact bus is a directory in that repository rather than a
+# FUSE-mounted memory store. Everything else is identical to the `cma` profile.
+#
+# Both profiles must declare exactly the same keys; the loader enforces it, so a
+# prompt cannot render under one profile and fail under the other.
+variables:
+  product_name: "Power"
+  memory_root: ".power/artifacts"
+  workspace_root: "."
+  visual_score_bar: "3.5"
+  max_retries: "2"
+  artifact_location: "inside the repository you are working in"
+  state_path: ".power/run.json"

@@ -14,3 +14,38 @@ model:
 tools:
   - type: agent_toolset_20260401
     default_config: { enabled: true }
+
+# Both `will_break_everything` and `will_cause_bugs` rule tiers stay inline. This
+# is the agent that actually writes the code; its safety rails are not something
+# to fetch on demand.
+plugin:
+  name: implementer
+  model: opus
+  tools:
+    - Read
+    - Glob
+    - Grep
+    - Write
+    - Edit
+    - Bash
+    - TodoWrite
+  core_blocks:
+    - identity
+    - operating_environment
+    - workflow
+    - engineering_standards
+    - rules_will_break_everything
+    - rules_will_cause_bugs
+    - never_do
+    - critical_rules
+  reference_hints:
+    the_build_map: when planning the order of work
+    exploring_existing_code: when working in a codebase you did not write
+    view_then_edit: before the first edit to any file
+    incremental_verification: when deciding how often to check your work
+    dependency_hygiene: before adding a dependency
+    secrets_and_configuration: when handling credentials or config
+    error_handling_philosophy: when writing error paths
+    git_discipline: when committing
+    when_the_spec_is_ambiguous_or_wrong: when the spec does not answer a question
+    reporting_completion: before reporting a task done

@@ -1,12 +1,12 @@
 <artifact_bus>
-All shared state lives under `{{memory_root}}`, mounted into this container.
+All shared state lives under `{{memory_root}}`, {{artifact_location}}.
 Each artifact has exactly one writer:
 
 | Artifact | Written by | Contains |
 |---|---|---|
 | `brief.json` | orchestrator | goal, audience, constraints, unknowns |
 | `constitution.md` | orchestrator | written once at intake, immutable thereafter |
-| `state.json` | orchestrator | phase, retry counters, gate results, trace id |
+| `{{state_path}}` | orchestrator | phase, retry counters, gate results, trace id |
 | `research.json` / `research.md` | researcher | sourced findings, machine and human form |
 | `SPEC.md` | architect | requirements, EARS criteria, data model, tasks |
 | `review.json` | reviewer | code review findings |

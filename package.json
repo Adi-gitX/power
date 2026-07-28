@@ -8,6 +8,7 @@
     "typecheck": "tsc --build",
     "test": "vitest run",
     "validate": "pnpm --filter @power/agents run validate && pnpm --filter @power/knowledge run validate",
+    "build:plugin": "pnpm --filter @power/agents run build:plugin",
     "check": "pnpm typecheck && pnpm validate && pnpm test"
   },
   "devDependencies": {

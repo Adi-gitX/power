@@ -39,3 +39,38 @@ delegates_to:
   - power_tester
   - power_verifier
   - power_documenter
+
+# In Claude Code this agent is the autonomous driver persona — pick it as the
+# session's agent and it runs a whole goal unattended. `/power` drives the same
+# pipeline from the skill instead; both paths dispatch the same specialists.
+#
+# The `run_gate` custom tool becomes two narrowly scoped Bash grants. That is a
+# stronger boundary than the CMA toolset, not a weaker one: this agent can
+# execute the gate and the state machine and literally nothing else, so "you
+# conduct, you don't perform" stays structural.
+plugin:
+  name: orchestrator
+  model: opus
+  tools:
+    - Read
+    - Glob
+    - Grep
+    - Write
+    - AskUserQuestion
+    - TodoWrite
+    - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/gate.mjs" *)
+    - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/run-state.mjs" *)
+    - Agent(power:researcher, power:architect, power:implementer, power:reviewer, power:tester, power:verifier, power:documenter)
+  core_blocks:
+    - identity
+    - pipeline
+    - state_machine
+    - delegation
+    - feedback_edges
+    - never_do
+    - critical_rules
+  reference_hints:
+    human_approval_gate: before asking the user to approve the plan
+    deploy_guardrail: before allowing anything to ship
+    blocked_runs: when a retry cap is reached
+    recovery: when resuming an interrupted run

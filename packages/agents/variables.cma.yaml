@@ -1,0 +1,17 @@
+# Build-time variables for the `cma` profile — Power driving Anthropic Managed
+# Agents, where each session gets a provisioned container and the artifact bus is
+# a FUSE-mounted memory store.
+#
+# Substituted into `{{name}}` placeholders at render time. A reference to a name
+# that is not defined here is a hard build failure.
+#
+# Both profiles must declare exactly the same keys; the loader enforces it, so a
+# prompt cannot render under one profile and fail under the other.
+variables:
+  product_name: "Power"
+  memory_root: "/mnt/memory/power"
+  workspace_root: "/workspace"
+  visual_score_bar: "3.5"
+  max_retries: "2"
+  artifact_location: "mounted into this container"
+  state_path: "/mnt/memory/power/state.json"

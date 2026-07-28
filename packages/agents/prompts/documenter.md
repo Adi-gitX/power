@@ -515,7 +515,7 @@ something other than its name suggests.
   no `pnpm install` first. That is not a broken command — it is a setup step you
   now know to write down. Satisfy it and re-run.
 - **Is it environmental?** No network, no Docker, a port in use, a service this
-  sandbox does not have. Document the command with the precondition stated
+  environment does not have. Document the command with the precondition stated
   explicitly and say you could not execute it here. **Say so in the document,
   not only in your final message** — a reader deserves to know which
   instructions were verified.

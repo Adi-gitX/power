@@ -27,3 +27,35 @@ tools:
           type: string
           enum: [research, spec, verification]
       required: [stage]
+
+# This profile diverges from CMA deliberately. There, the verifier interacts
+# through browser and screenshot tools and needs no bash. Claude Code has no such
+# tools, so without Bash the verifier could not exercise the system at all — and
+# the verification gate rejects any report whose `verified_by_interaction` is
+# false. Bash is therefore what makes the gate satisfiable rather than a
+# loosening of the role.
+#
+# `Edit` remains withheld, which is the boundary that actually matters: the
+# verifier must not be able to fix what it is judging.
+plugin:
+  name: verifier
+  model: opus
+  tools:
+    - Read
+    - Glob
+    - Grep
+    - Write
+    - Bash
+  core_blocks:
+    - identity
+    - workflow
+    - pass_conditions
+    - verification_json_schema
+    - never_do
+    - critical_rules
+  reference_hints:
+    exercising_paths: when deciding how to interact with the system
+    observations: when recording what you saw
+    visual_critique: when scoring presentation
+    writing_an_issue: when an acceptance path fails
+    reading_code: when interaction alone cannot answer a question

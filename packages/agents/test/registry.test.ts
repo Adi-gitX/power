@@ -14,8 +14,11 @@ afterEach(() => {
 function makeRegistry(files: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), 'power-registry-'));
   created.push(root);
+  // One file per profile: the loader reads them all so it can enforce key parity
+  // across profiles, not just load the one it was asked for.
   const defaults: Record<string, string> = {
-    'variables.yaml': 'variables: {}\n',
+    'variables.cma.yaml': 'variables: {}\n',
+    'variables.plugin.yaml': 'variables: {}\n',
     'sections.yaml': 'sections: {}\n',
   };
   for (const [path, content] of Object.entries({ ...defaults, ...files })) {
@@ -217,5 +220,73 @@ describe('orphan sections', () => {
     const { agents, orphanSections } = loadRegistry(root);
     expect(orphanSections).toEqual([]);
     expect(agents[0]!.system).toBe('outer includes inner body');
+  });
+});
+
+describe('profiles', () => {
+  const PLUGIN = `
+plugin:
+  name: solo
+  model: opus
+  tools: [Read]
+  core_blocks: [identity]
+`;
+
+  it('renders profile-specific variable values', () => {
+    const root = makeRegistry({
+      'prompts/solo.md': 'root is {{workspace_root}}',
+      'variables.cma.yaml': 'variables:\n  workspace_root: "/workspace"\n',
+      'variables.plugin.yaml': 'variables:\n  workspace_root: "."\n',
+      'registry/solo.agent.yaml': AGENT + PLUGIN,
+    });
+    expect(loadRegistry(root, 'cma').agents[0]!.system).toBe('root is /workspace');
+    expect(loadRegistry(root, 'plugin').agents[0]!.system).toBe('root is .');
+  });
+
+  // Without this, a prompt could reference a variable only one profile defines,
+  // render cleanly there, and break the other build — caught by whichever ran second.
+  it('rejects profiles that do not declare the same variable keys', () => {
+    const root = makeRegistry({
+      'prompts/solo.md': 'body',
+      'variables.cma.yaml': 'variables:\n  a: "1"\n  b: "2"\n',
+      'variables.plugin.yaml': 'variables:\n  a: "1"\n',
+      'registry/solo.agent.yaml': AGENT,
+    });
+    expect(() => loadRegistry(root)).toThrow(/missing: b/);
+  });
+
+  it('rejects an unknown profile', () => {
+    const root = makeRegistry({
+      'prompts/solo.md': 'body',
+      'registry/solo.agent.yaml': AGENT,
+    });
+    expect(() => loadRegistry(root, 'sandbox' as never)).toThrow(/unknown profile/);
+  });
+
+  it('requires a plugin block only for the plugin profile', () => {
+    const root = makeRegistry({
+      'prompts/solo.md': 'body',
+      'registry/solo.agent.yaml': AGENT,
+    });
+    expect(loadRegistry(root, 'cma').agents[0]!.plugin).toBeUndefined();
+    expect(() => loadRegistry(root, 'plugin')).toThrow(/missing `plugin` block/);
+  });
+
+  it('rejects a plugin name that is not kebab-case', () => {
+    const root = makeRegistry({
+      'prompts/solo.md': 'body',
+      'registry/solo.agent.yaml': AGENT + PLUGIN.replace('name: solo', 'name: Solo_Agent'),
+    });
+    expect(() => loadRegistry(root, 'plugin')).toThrow(/kebab-case/);
+  });
+
+  it('rejects two agents that would write the same agent file', () => {
+    const root = makeRegistry({
+      'prompts/solo.md': 'body',
+      'registry/solo.agent.yaml': AGENT + PLUGIN,
+      'registry/other.agent.yaml':
+        AGENT.replace('name: solo', 'name: other') + PLUGIN,
+    });
+    expect(() => loadRegistry(root, 'plugin')).toThrow(/duplicate plugin.name/);
   });
 });

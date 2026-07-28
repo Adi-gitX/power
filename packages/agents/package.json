@@ -7,8 +7,9 @@
   "types": "./dist/index.d.ts",
   "exports": { ".": "./dist/index.js" },
   "scripts": {
-    "validate": "tsx src/cli.ts validate",
-    "render": "tsx src/cli.ts render"
+    "validate": "tsx src/cli.ts validate --profile cma && tsx src/cli.ts validate --profile plugin",
+    "render": "tsx src/cli.ts render",
+    "build:plugin": "tsx src/cli.ts build --profile plugin --out ../.."
   },
   "dependencies": {
     "yaml": "^2.6.1"

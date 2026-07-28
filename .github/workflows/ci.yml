@@ -40,6 +40,22 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # `agents/` and `skills/power/reference/` are generated from the prompts
+      # but committed, because the plugin *is* this repository — an installed
+      # user gets whatever is checked in. So a prompt edit that was never rebuilt
+      # ships the old text while the diff looks correct. Rebuilding and diffing
+      # is the only thing that catches it.
+      - name: Plugin build is committed and reproducible
+        run: |
+          set -e
+          pnpm build:plugin
+          if ! git diff --quiet -- agents skills/power/reference; then
+            echo "::error::agents/ or skills/power/reference/ is stale — run 'pnpm build:plugin' and commit"
+            git diff --stat -- agents skills/power/reference
+            exit 1
+          fi
+          echo "generated plugin tree matches the committed one"
+
       # Guards the claim the gate layer makes about itself: the golden fixtures
       # must pass and the deliberately broken ones must fail. A gate that cannot
       # fail is not a gate.

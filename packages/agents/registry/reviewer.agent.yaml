@@ -15,3 +15,28 @@ tools:
       - { name: glob, enabled: true }
       - { name: grep, enabled: true }
       - { name: write, enabled: true }
+
+# No Edit and no Bash, matching the CMA toolset. `Write` is present only so the
+# reviewer can emit `review.json`; the prompt's never_do makes that the one file
+# it writes. Without Bash it cannot run the test suite, which is deliberate — it
+# reviews code — so its report records that as an explicit limit.
+plugin:
+  name: reviewer
+  model: opus
+  tools:
+    - Read
+    - Glob
+    - Grep
+    - Write
+  core_blocks:
+    - identity
+    - coverage_first
+    - defect_versus_preference
+    - review_json_schema
+    - workflow
+    - never_do
+    - critical_rules
+  reference_hints:
+    failure_scenarios: when writing the failure scenario for a finding
+    taxonomy: when assigning a category to a finding
+    spec_conformance_review: when checking the code against SPEC.md

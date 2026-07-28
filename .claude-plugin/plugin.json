@@ -1,0 +1,9 @@
+{
+  "name": "power",
+  "version": "0.1.0",
+  "description": "Deploy an autonomous engineering team into your own Claude Code session. Describe a goal and Power runs the whole pipeline — research, spec, implementation, review, tests, acceptance, docs — dispatching eight specialist agents through a state machine whose stage boundaries are enforced by deterministic gates running as code, not by asking a model whether it did a good job. Every retry is counted and capped; a run that cannot pass a gate stops and says so instead of looping.",
+  "author": {
+    "name": "Adithya Kammati",
+    "email": "adithya.k@emergent.sh"
+  }
+}
