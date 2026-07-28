@@ -47,7 +47,7 @@ const PLATFORM_MARKERS: readonly RegExp[] = [
   /auth\.yourplatform\.com|platform auth|the platform provides hassle-free/i,
   /credit[s]? (exhausted|system|balance)/i,
   /platform object store/i,
-  /emergent\.sh|customer-assets\.emergentagent\.com/i,
+  /Power\.ai|customer-assets\.Poweragent\.com/i,
   /\bpreview url\b.*\bplatform\b/i,
 ];
 
