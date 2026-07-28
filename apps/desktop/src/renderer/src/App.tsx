@@ -45,6 +45,7 @@ declare global {
       approve(): Promise<void>;
       reject(reason: string): Promise<void>;
       stop(): Promise<void>;
+      hide(): Promise<void>;
       readArtifact(repo: string, name: string): Promise<string | null>;
       onEvent(handler: (event: PowerEvent) => void): () => void;
     };
@@ -83,23 +84,59 @@ export default function App() {
   const [rejectReason, setRejectReason] = useState('');
   const logEnd = useRef<HTMLDivElement>(null);
   const surface = useRef<HTMLDivElement>(null);
+  const ask = useRef<HTMLTextAreaElement>(null);
   const repoRef = useRef<string | null>(null);
   repoRef.current = repo;
 
   useEffect(() => {
     void window.power.history().then(setHistory);
-  }, [view]);
+    if (view === 'home' && phase === 'app') {
+      // After the entrance settles.
+      const id = setTimeout(() => ask.current?.focus(), 350);
+      return () => clearTimeout(id);
+    }
+  }, [view, phase]);
 
-  // The surface breathes in once the intro hands over.
+  // The surface breathes in once the intro hands over, then its contents
+  // arrive in reading order — sidebar, wordmark, ask box — so the app assembles
+  // rather than pops. Raycast's trick, and it costs three tweens.
   useEffect(() => {
     if (phase !== 'app' || !surface.current) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    gsap.fromTo(
+    const q = gsap.utils.selector(surface);
+    const tl = gsap.timeline();
+    tl.fromTo(
       surface.current,
       { opacity: 0, scale: 0.985, y: 6 },
-      { opacity: 1, scale: 1, y: 0, duration: 0.55, ease: 'power3.out' },
-    );
+      { opacity: 1, scale: 1, y: 0, duration: 0.5, ease: 'power3.out' },
+    )
+      .fromTo(
+        q('aside'),
+        { opacity: 0, x: -10 },
+        { opacity: 1, x: 0, duration: 0.4, ease: 'power2.out' },
+        '-=0.25',
+      )
+      .fromTo(
+        q('[data-arrive]'),
+        { opacity: 0, y: 14 },
+        { opacity: 1, y: 0, duration: 0.45, ease: 'power3.out', stagger: 0.08 },
+        '-=0.2',
+      );
   }, [phase]);
+
+  // Keyboard-first, Raycast-style: Escape puts the window away when nothing
+  // needs you; ⌘N starts a fresh session. The window stays resident either way.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && view === 'home' && !running) void window.power.hide();
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+        setView('home');
+        setGoal('');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [view, running]);
 
   useEffect(() => {
     return window.power.onEvent((e) => {
@@ -199,7 +236,19 @@ export default function App() {
       {phase === 'intro' && <Intro onDone={() => setPhase('app')} />}
 
       {phase === 'app' && (
-        <div ref={surface} className="surface flex h-full overflow-hidden">
+        <div ref={surface} className="surface relative flex h-full overflow-hidden">
+          {/* The same ambient warmth as the website: two fixed blooms the
+              content sits in front of. Decoration only, so it is aria-hidden
+              and cannot intercept a click. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                'radial-gradient(42rem 30rem at 12% -8%, rgba(201,100,66,0.07), transparent 62%),' +
+                'radial-gradient(38rem 28rem at 92% 108%, rgba(201,100,66,0.05), transparent 64%)',
+            }}
+          />
           {/* ——— Sidebar: a floating panel, Perplexity-style ——— */}
           <aside className="titlebar-drag flex w-64 shrink-0 flex-col border-r border-hairline bg-panel/60">
             <div className="h-12 shrink-0" />
@@ -274,12 +323,16 @@ export default function App() {
 
             {view === 'home' && (
               <div className="flex flex-1 flex-col items-center justify-center gap-10 px-10 pb-24">
-                <h1 className="display text-6xl text-ink">
+                <h1 data-arrive className="display text-6xl text-ink">
                   power<span className="text-accent-soft">/</span>
                 </h1>
 
-                <div className="w-full max-w-2xl rounded-2xl border border-hairline bg-panel p-3 shadow-[0_16px_50px_rgba(0,0,0,0.35)]">
+                <div
+                  data-arrive
+                  className="w-full max-w-2xl rounded-2xl border border-hairline bg-panel p-3 shadow-[0_16px_50px_rgba(0,0,0,0.35)] transition-colors focus-within:border-white/20"
+                >
                   <textarea
+                    ref={ask}
                     value={goal}
                     onChange={(e) => setGoal(e.target.value)}
                     onKeyDown={(e) => {
@@ -314,9 +367,15 @@ export default function App() {
                   </div>
                 </div>
 
-                <p className="max-w-md text-center text-[13px] leading-relaxed text-mutedtext">
+                <p
+                  data-arrive
+                  className="max-w-md text-center text-[13px] leading-relaxed text-mutedtext"
+                >
                   Eight specialists, gates that run as code, one approval. Runs use your
                   own Claude Code login — there is no API key.
+                  <span className="mt-2 block text-[11px] text-mutedtext/70">
+                    ⌘⇧Space summons Power from anywhere · Esc puts it away
+                  </span>
                 </p>
               </div>
             )}

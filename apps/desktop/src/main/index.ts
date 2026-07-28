@@ -7,7 +7,17 @@
  * Those fire when the app is in the background, which is precisely when a
  * long unattended run needs to reach you.
  */
-import { app, BrowserWindow, dialog, ipcMain, Notification } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  globalShortcut,
+  ipcMain,
+  Menu,
+  nativeImage,
+  Notification,
+  Tray,
+} from 'electron';
 
 // The intro chime is synthesized in the renderer on launch; without this,
 // Chromium's autoplay policy silences audio that no click preceded.
@@ -23,7 +33,31 @@ const POWER_ROOT =
   process.env.POWER_ROOT ?? resolve(app.getAppPath(), '..', '..');
 
 let win: BrowserWindow | null = null;
+let tray: Tray | null = null;
 let activeRun: PowerRun | null = null;
+
+/**
+ * Raycast-style lifecycle: closing the window never quits. The app lives in the
+ * menu bar and the Dock, the window hides instead of closing, and a global
+ * shortcut summons it from anywhere — which is what lets a long unattended run
+ * keep going with no window on screen at all. Quitting is an explicit act, from
+ * the tray menu or Cmd+Q.
+ */
+let quitting = false;
+
+function showWindow(): void {
+  if (!win) {
+    createWindow();
+    return;
+  }
+  win.show();
+  win.focus();
+}
+
+function toggleWindow(): void {
+  if (win?.isVisible() && win.isFocused()) win.hide();
+  else showWindow();
+}
 
 function notify(title: string, body: string): void {
   if (Notification.isSupported()) new Notification({ title, body }).show();
@@ -54,11 +88,47 @@ function createWindow(): void {
     },
   });
 
+  // Hide, never close — the run (and the app) outlives its window.
+  win.on('close', (event) => {
+    if (!quitting) {
+      event.preventDefault();
+      win?.hide();
+    }
+  });
+
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
     void win.loadFile(join(app.getAppPath(), 'out', 'renderer', 'index.html'));
   }
+}
+
+function createTray(): void {
+  const icon = nativeImage.createFromPath(
+    join(app.getAppPath(), 'resources', 'trayTemplate.png'),
+  );
+  icon.setTemplateImage(true);
+  tray = new Tray(icon);
+  tray.setToolTip('Power');
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Open Power', click: showWindow },
+      { type: 'separator' },
+      {
+        label: 'Summon: ⌘⇧Space',
+        enabled: false,
+      },
+      { type: 'separator' },
+      {
+        label: 'Quit Power',
+        click: () => {
+          quitting = true;
+          app.quit();
+        },
+      },
+    ]),
+  );
+  tray.on('click', toggleWindow);
 }
 
 /** Recent runs, for the sidebar. One JSON file in userData; newest first. */
@@ -136,12 +206,21 @@ app.whenReady().then(() => {
     readArtifact(repoDir, name),
   );
 
+  ipcMain.handle('power:hide-window', () => win?.hide());
+
   createWindow();
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
+  createTray();
+  globalShortcut.register('CommandOrControl+Shift+Space', toggleWindow);
+
+  app.on('activate', () => showWindow());
 });
 
+app.on('before-quit', () => {
+  quitting = true;
+});
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+});
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  // Stay resident: the tray and the shortcut keep the app reachable.
 });

@@ -13,6 +13,7 @@ const api = {
   approve: (): Promise<void> => ipcRenderer.invoke('power:approve'),
   reject: (reason: string): Promise<void> => ipcRenderer.invoke('power:reject', reason),
   stop: (): Promise<void> => ipcRenderer.invoke('power:stop'),
+  hide: (): Promise<void> => ipcRenderer.invoke('power:hide-window'),
   readArtifact: (repoDir: string, name: string): Promise<string | null> =>
     ipcRenderer.invoke('power:read-artifact', repoDir, name),
   onEvent: (handler: (event: unknown) => void): (() => void) => {
