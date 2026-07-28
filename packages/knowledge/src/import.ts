@@ -256,8 +256,8 @@ export function importPlaybooks(sourceRoot: string, packsRoot: string): ImportRe
 
     const summary = platformBound
       ? `${description}. DISABLED ON IMPORT: this playbook instructs the agent to use ` +
-        `source-platform services (its auth broker, credit system, or asset host) that do not ` +
-        `exist outside that platform. Adapt it before enabling.`
+      `source-platform services (its auth broker, credit system, or asset host) that do not ` +
+      `exist outside that platform. Adapt it before enabling.`
       : `Integration guidance for ${description}, imported from the reference playbook corpus.`;
 
     writeFileSync(
