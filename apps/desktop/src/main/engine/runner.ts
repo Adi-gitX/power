@@ -19,6 +19,33 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { EngineOptions, Role, RunEvent, StageId } from './types.js';
 
+/**
+ * Cost discipline, per role. The registry already decided researcher and
+ * documenter are sonnet-class work; the engine now honours that instead of
+ * dispatching every stage on the session default. Turn caps bound the worst
+ * case: a stage that has not converged by its cap is not converging, and
+ * burning further budget on it is the retry loop's job to decide, not the
+ * stage's.
+ */
+const ROLE_MODEL: Record<string, string> = {
+  researcher: 'sonnet',
+  architect: 'opus',
+  implementer: 'opus',
+  reviewer: 'opus',
+  tester: 'opus',
+  verifier: 'opus',
+  documenter: 'sonnet',
+};
+const ROLE_MAX_TURNS: Record<string, number> = {
+  researcher: 30,
+  architect: 25,
+  implementer: 60,
+  reviewer: 25,
+  tester: 40,
+  verifier: 30,
+  documenter: 25,
+};
+
 const GATE_RETRY_EDGE: Record<string, string> = {
   research: 'research_refetch',
   spec: 'spec_revision',
@@ -38,6 +65,7 @@ class ToolFailure extends Error {
 export class PowerRun extends EventEmitter {
   private approvalResolver: ((approved: { ok: boolean; reason?: string }) => void) | null = null;
   private stopped = false;
+  private activeChild: ReturnType<typeof spawn> | null = null;
 
   constructor(private readonly opts: EngineOptions) {
     super();
@@ -54,8 +82,10 @@ export class PowerRun extends EventEmitter {
   reject(reason: string): void {
     this.approvalResolver?.({ ok: false, reason });
   }
+  /** Stop means stop: flag the loop AND kill whatever is burning right now. */
   stop(): void {
     this.stopped = true;
+    this.activeChild?.kill('SIGTERM');
   }
 
   private exec(cmd: string, args: string[], onLine?: (line: string) => void): Promise<string> {
@@ -68,6 +98,7 @@ export class PowerRun extends EventEmitter {
         cwd: this.opts.repoDir,
         env: viaSelf ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' } : process.env,
       });
+      this.activeChild = child;
       let out = '';
       const feed = (chunk: Buffer) => {
         const text = chunk.toString();
@@ -143,6 +174,10 @@ export class PowerRun extends EventEmitter {
             'acceptEdits',
             '--add-dir',
             this.opts.repoDir,
+            '--model',
+            ROLE_MODEL[role] ?? 'sonnet',
+            '--max-turns',
+            String(ROLE_MAX_TURNS[role] ?? 30),
           ],
         };
 
@@ -171,9 +206,11 @@ export class PowerRun extends EventEmitter {
           : [
               ...brief,
               '',
-              'The previous attempt FAILED its gate. The exact rule violations:',
+              'RETRY, not a redo. The artifact already exists — read it first. It FAILED',
+              'its gate on exactly these rules:',
               lastGateOutput,
-              'Fix the artifact so these specific rules pass. Do not relax anything else.',
+              'Edit the existing artifact to fix ONLY these violations. Do not redo the',
+              'underlying work, do not refetch sources, do not restructure what passed.',
             ];
       await this.dispatch(role, fullBrief);
       if (await this.gate(stage)) {

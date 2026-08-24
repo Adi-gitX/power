@@ -122,7 +122,10 @@ describe('the desktop engine drives the full pipeline', () => {
     const retryBriefs = dispatches.slice(1);
     expect(retryBriefs.length).toBeGreaterThan(0);
     for (const brief of retryBriefs) {
-      expect(brief).toContain('FAILED its gate');
+      // The brief must demand a fix, not a redo — redoing is the expensive
+      // failure mode — and must quote the actual rule violations.
+      expect(brief).toContain('RETRY, not a redo');
+      expect(brief).toContain('fix ONLY these violations');
       expect(brief).toMatch(/research\.json/);
     }
   });
