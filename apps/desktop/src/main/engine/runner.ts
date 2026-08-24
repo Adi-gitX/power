@@ -83,13 +83,28 @@ export class PowerRun extends EventEmitter {
     });
   }
 
+  /**
+   * The compiled CLIs, not the dev wrappers. `scripts/*.mjs` launch tsx to run
+   * TypeScript straight from src — right for the plugin and the terminal, wrong
+   * inside a packaged app, where the TS loader chain is one more thing to break
+   * (and did, on the first real run). The packages are already compiled to
+   * plain JS by `tsc --build`; the app calls that, and the only runtime it
+   * needs is the node it already carries.
+   */
   private state(args: string[]): Promise<string> {
-    return this.exec('node', [join(this.opts.powerRoot, 'scripts', 'run-state.mjs'), ...args]);
+    return this.exec('node', [
+      join(this.opts.powerRoot, 'packages', 'core', 'dist', 'cli.js'),
+      ...args,
+    ]);
   }
 
   private async gate(stage: 'research' | 'spec' | 'verification'): Promise<boolean> {
     try {
-      const out = await this.exec('node', [join(this.opts.powerRoot, 'scripts', 'gate.mjs'), stage]);
+      const out = await this.exec('node', [
+        join(this.opts.powerRoot, 'packages', 'gates', 'dist', 'cli.js'),
+        stage,
+        join(this.opts.repoDir, '.power', 'artifacts'),
+      ]);
       this.emitEvent({ type: 'gate', stage, pass: true, detail: out.trim() });
       return true;
     } catch (error) {
