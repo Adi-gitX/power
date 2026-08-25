@@ -34,7 +34,13 @@ export type Phase = (typeof PHASES)[number];
 export const FEEDBACK_EDGES = ['research_refetch', 'spec_revision', 'needs_fixes'] as const;
 export type FeedbackEdge = (typeof FEEDBACK_EDGES)[number];
 
-export type GateStatus = 'pending' | 'pass' | 'fail';
+/**
+ * `skipped` exists so a run can honestly decline a stage. It is not a pass:
+ * the record says nobody checked, which is exactly what a reader must know.
+ * Only research may be skipped — verification is a deploy condition and has
+ * no skip path by design.
+ */
+export type GateStatus = 'pending' | 'pass' | 'fail' | 'skipped';
 
 export interface TransitionRecord {
   at: string;
@@ -103,6 +109,7 @@ export function createRunState(traceId: string, clock: Clock = systemClock): Run
  */
 export type RunEvent =
   | { type: 'start_research' }
+  | { type: 'research_skipped' }
   | { type: 'gate_result'; stage: Stage; result: GateResult }
   | { type: 'checkpoint_acknowledged' }
   | { type: 'spec_approved' }
@@ -124,7 +131,7 @@ const RETRY_TARGET: Record<FeedbackEdge, Phase> = {
 
 /** Legal `phase -> phase` moves, so a bug cannot silently skip the approval gate. */
 const ALLOWED: Record<Phase, readonly Phase[]> = {
-  intake: ['research', 'blocked'],
+  intake: ['research', 'spec', 'blocked'],
   research: ['research_review', 'research', 'blocked'],
   research_review: ['spec', 'research', 'blocked'],
   spec: ['spec_approval', 'research', 'spec', 'blocked'],
@@ -170,6 +177,17 @@ export function apply(state: RunState, event: RunEvent, clock: Clock = systemClo
   switch (event.type) {
     case 'start_research':
       return transition(state, 'research', event.type, clock);
+
+    case 'research_skipped': {
+      // Legal only from intake: a run that already started research cannot
+      // retroactively un-run it. The transition guard enforces this, since
+      // no other phase lists `spec` while research is pending.
+      const next: RunState = {
+        ...state,
+        gates: { ...state.gates, research: 'skipped' },
+      };
+      return transition(next, 'spec', event.type, clock, 'research skipped by run options');
+    }
 
     case 'gate_result': {
       const next: RunState = {

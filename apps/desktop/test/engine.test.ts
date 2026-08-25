@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { PowerRun } from '../src/main/engine/runner.js';
+import { PowerRun, claudeArgs, parseStreamLine } from '../src/main/engine/runner.js';
 import type { RunEvent } from '../src/main/engine/types.js';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
@@ -128,5 +128,87 @@ describe('the desktop engine drives the full pipeline', () => {
       expect(brief).toContain('fix ONLY these violations');
       expect(brief).toMatch(/research\.json/);
     }
+  });
+});
+
+describe('run options', () => {
+  it(
+    'the cheapest run dispatches only architect → implementer → verifier and never pauses',
+    { timeout: 120_000 },
+    async () => {
+      const repoDir = scratchRepo();
+      const events: RunEvent[] = [];
+      const roles: string[] = [];
+
+      const run = new PowerRun({
+        repoDir,
+        goal: 'cheapest possible honest run',
+        powerRoot: POWER_ROOT,
+        features: {
+          tier: 'eco',
+          research: false,
+          reviewTest: false,
+          docs: false,
+          autoApprove: true,
+          packs: false,
+        },
+        agentCommand: (role) => {
+          roles.push(role);
+          return { cmd: 'node', args: [MOCK, role, repoDir, FIXTURES] };
+        },
+      });
+      run.on('event', (e: RunEvent) => events.push(e));
+      await run.run();
+
+      expect(roles).toEqual(['architect', 'implementer', 'verifier']);
+      // The pause never surfaced — but the approval itself still happened,
+      // through the reducer, after the spec gate passed.
+      expect(events.some((e) => e.type === 'needs_approval')).toBe(false);
+      const done = events.find((e) => e.type === 'done');
+      expect(done, 'run must reach done').toBeDefined();
+      expect(done!.type === 'done' && done!.summary).toContain('research=skipped');
+      expect(done!.type === 'done' && done!.summary).toContain('deployable   yes');
+    },
+  );
+
+  it('eco tier pins every dispatch to sonnet with tightened caps', () => {
+    const eco = claudeArgs('implementer', 'd', 'sys', '/tmp/x', {
+      tier: 'eco',
+      research: true,
+      reviewTest: true,
+      docs: true,
+      autoApprove: false,
+      packs: false,
+    });
+    expect(eco[eco.indexOf('--model') + 1]).toBe('sonnet');
+    expect(Number(eco[eco.indexOf('--max-turns') + 1])).toBe(42); // 60 × 0.7
+
+    const balanced = claudeArgs('researcher', 'd', 'sys', '/tmp/x', {
+      tier: 'balanced',
+      research: true,
+      reviewTest: true,
+      docs: true,
+      autoApprove: false,
+      packs: false,
+    });
+    expect(balanced[balanced.indexOf('--model') + 1]).toBe('sonnet');
+    expect(balanced).toContain('stream-json');
+  });
+
+  it('parses real stream-json frames and passes mock plain text through', () => {
+    expect(
+      parseStreamLine(
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the spec."}]}}',
+      ),
+    ).toEqual({ kind: 'text', text: 'Reading the spec.' });
+    expect(
+      parseStreamLine('{"type":"result","subtype":"success","total_cost_usd":0.4187,"num_turns":14}'),
+    ).toEqual({ kind: 'usage', costUsd: 0.4187, turns: 14 });
+    expect(parseStreamLine('researcher: wrote golden artifacts')).toEqual({
+      kind: 'raw',
+      line: 'researcher: wrote golden artifacts',
+    });
+    // Tool-use frames are noise to the card, not lines.
+    expect(parseStreamLine('{"type":"system","subtype":"init"}')).toEqual({ kind: 'noise' });
   });
 });

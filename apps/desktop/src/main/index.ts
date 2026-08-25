@@ -27,7 +27,14 @@ import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { PowerRun, readArtifact } from './engine/runner.js';
-import type { RunEvent } from './engine/types.js';
+import { DEFAULT_FEATURES, type RunEvent, type RunFeatures } from './engine/types.js';
+
+// Two instances would run two engines against one quota. The second launch
+// just summons the first.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+}
+app.on('second-instance', () => showWindow());
 
 // A Finder-launched app inherits PATH=/usr/bin:/bin — the `claude` CLI lives
 // in homebrew's prefix, so extend PATH before anything spawns.
@@ -181,6 +188,12 @@ function recordRun(entry: Record<string, unknown>): void {
   const rows = [entry, ...readHistory()].slice(0, 50);
   writeFileSync(historyPath(), JSON.stringify(rows, null, 2));
 }
+/** Stamp the newest row when its run finishes, so Recent shows what it cost. */
+function updateLatestRun(patch: Record<string, unknown>): void {
+  const rows = readHistory() as Record<string, unknown>[];
+  if (rows[0]) rows[0] = { ...rows[0], ...patch };
+  writeFileSync(historyPath(), JSON.stringify(rows, null, 2));
+}
 
 app.whenReady().then(() => {
   ipcMain.handle('power:history', () => readHistory());
@@ -193,7 +206,9 @@ app.whenReady().then(() => {
     return result.canceled ? null : result.filePaths[0];
   });
 
-  ipcMain.handle('power:start-run', (_event, repoDir: string, goal: string) => {
+  ipcMain.handle(
+    'power:start-run',
+    (_event, repoDir: string, goal: string, features?: RunFeatures) => {
     if (activeRun) return { ok: false, error: 'a run is already active' };
     if (!existsSync(join(POWER_ROOT, 'scripts', 'run-state.mjs'))) {
       return { ok: false, error: `Power root not found at ${POWER_ROOT}` };
@@ -202,6 +217,7 @@ app.whenReady().then(() => {
     activeRun = new PowerRun({
       repoDir,
       goal,
+      features: features ?? DEFAULT_FEATURES,
       powerRoot: POWER_ROOT,
       // The test harness swaps the model for fixture-writing mocks; production
       // dispatches through the user's own `claude` CLI login.
@@ -220,19 +236,28 @@ app.whenReady().then(() => {
         : {}),
     });
 
+    let lastCost = 0;
     activeRun.on('event', (e: RunEvent) => {
       win?.webContents.send('power:event', e);
+      if (e.type === 'run_usage') lastCost = e.costUsd;
       if (e.type === 'needs_approval') notify('Power', 'A spec is waiting for your approval.');
-      if (e.type === 'blocked') notify('Power — run blocked', e.reason.split('\n')[0] ?? '');
-      if (e.type === 'done') notify('Power — run complete', 'All gates passed.');
+      if (e.type === 'blocked') {
+        updateLatestRun({ outcome: 'blocked', costUsd: lastCost });
+        notify('Power — run blocked', e.reason.split('\n')[0] ?? '');
+      }
+      if (e.type === 'done') {
+        updateLatestRun({ outcome: 'done', costUsd: lastCost });
+        notify('Power — run complete', 'All gates passed.');
+      }
     });
 
-    recordRun({ goal, repoDir, at: new Date().toISOString() });
+    recordRun({ goal, repoDir, features: features ?? DEFAULT_FEATURES, at: new Date().toISOString() });
     void activeRun.run().finally(() => {
       activeRun = null;
     });
     return { ok: true };
-  });
+    },
+  );
 
   ipcMain.handle('power:approve', () => activeRun?.approve());
   ipcMain.handle('power:reject', (_event, reason: string) => activeRun?.reject(reason));

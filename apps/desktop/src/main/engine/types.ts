@@ -30,17 +30,42 @@ export type RunEvent =
   | { type: 'agent'; role: Role; line: string }
   | { type: 'gate'; stage: 'research' | 'spec' | 'verification'; pass: boolean; detail: string }
   | { type: 'retry'; edge: string; used: number; cap: number; reason: string }
+  | { type: 'agent_usage'; role: Role; costUsd: number; turns: number }
+  | { type: 'run_usage'; costUsd: number }
   | { type: 'needs_approval'; specPath: string }
   | { type: 'state'; raw: string }
   | { type: 'blocked'; reason: string }
   | { type: 'done'; summary: string }
   | { type: 'error'; message: string };
 
+/** Per-run controls, chosen in the ask box. Every flag is honest: a skipped
+ * stage is recorded as skipped, never faked as passed. */
+export interface RunFeatures {
+  /** eco: all-sonnet, tighter caps · balanced: per-role · max: all-opus, looser caps */
+  tier: 'eco' | 'balanced' | 'max';
+  research: boolean;
+  reviewTest: boolean;
+  docs: boolean;
+  autoApprove: boolean;
+  packs: boolean;
+}
+
+export const DEFAULT_FEATURES: RunFeatures = {
+  tier: 'balanced',
+  research: true,
+  reviewTest: true,
+  docs: true,
+  autoApprove: false,
+  packs: false,
+};
+
 export interface EngineOptions {
   /** Absolute path of the repository the run works in. */
   repoDir: string;
   /** The goal sentence. */
   goal: string;
+  /** Run options; defaults to DEFAULT_FEATURES. */
+  features?: RunFeatures;
   /** Absolute path of the Power plugin root (scripts/, agents/). */
   powerRoot: string;
   /**

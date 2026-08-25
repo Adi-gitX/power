@@ -34,6 +34,45 @@ interface HistoryRow {
   goal: string;
   repoDir: string;
   at: string;
+  outcome?: string;
+  costUsd?: number;
+}
+
+interface RunFeatures {
+  tier: 'eco' | 'balanced' | 'max';
+  research: boolean;
+  reviewTest: boolean;
+  docs: boolean;
+  autoApprove: boolean;
+  packs: boolean;
+}
+
+const DEFAULT_FEATURES: RunFeatures = {
+  tier: 'balanced',
+  research: true,
+  reviewTest: true,
+  docs: true,
+  autoApprove: false,
+  packs: false,
+};
+
+function loadFeatures(): RunFeatures {
+  try {
+    return { ...DEFAULT_FEATURES, ...JSON.parse(localStorage.getItem('power.options') ?? '{}') };
+  } catch {
+    return DEFAULT_FEATURES;
+  }
+}
+
+/** What a run is NOT doing, for the header — a cheap run must look cheap. */
+function offSummary(f: RunFeatures): string {
+  const off: string[] = [];
+  if (!f.research) off.push('no research');
+  if (!f.reviewTest) off.push('no review/test');
+  if (!f.docs) off.push('no docs');
+  if (f.autoApprove) off.push('auto-approve');
+  if (f.tier !== 'balanced') off.push(f.tier);
+  return off.join(' · ');
 }
 
 declare global {
@@ -41,7 +80,11 @@ declare global {
     power: {
       pickRepo(): Promise<string | null>;
       history(): Promise<HistoryRow[]>;
-      startRun(repo: string, goal: string): Promise<{ ok: boolean; error?: string }>;
+      startRun(
+        repo: string,
+        goal: string,
+        features?: RunFeatures,
+      ): Promise<{ ok: boolean; error?: string }>;
       approve(): Promise<void>;
       reject(reason: string): Promise<void>;
       stop(): Promise<void>;
@@ -113,6 +156,7 @@ function StageCard({
   lines,
   gate,
   retriesUsed,
+  usage,
   children,
 }: {
   stage: StageId;
@@ -120,6 +164,7 @@ function StageCard({
   lines: string[];
   gate?: { pass: boolean } | undefined;
   retriesUsed?: number | undefined;
+  usage?: { costUsd: number; turns: number } | undefined;
   children?: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -175,6 +220,11 @@ function StageCard({
             retry {retriesUsed}/2
           </span>
         ) : null}
+        {usage && usage.costUsd > 0 ? (
+          <span className="rounded-md border border-hairline bg-canvas/60 px-1.5 py-0.5 font-mono text-[10.5px] text-mutedtext">
+            ${usage.costUsd.toFixed(2)} · {usage.turns}t
+          </span>
+        ) : null}
         {lines.length > 3 && (
           <span className="ml-auto shrink-0 text-[11px] text-mutedtext">
             {open ? 'collapse' : `${lines.length} lines`}
@@ -218,6 +268,18 @@ export default function App() {
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [features, setFeatures] = useState<RunFeatures>(loadFeatures);
+  const [runFeatures, setRunFeatures] = useState<RunFeatures>(DEFAULT_FEATURES);
+  const [usage, setUsage] = useState<Record<string, { costUsd: number; turns: number }>>({});
+  const [totalCost, setTotalCost] = useState(0);
+
+  const setFeature = (patch: Partial<RunFeatures>) => {
+    setFeatures((f) => {
+      const next = { ...f, ...patch };
+      localStorage.setItem('power.options', JSON.stringify(next));
+      return next;
+    });
+  };
   const logEnd = useRef<HTMLDivElement>(null);
   const surface = useRef<HTMLDivElement>(null);
   const ask = useRef<HTMLTextAreaElement>(null);
@@ -305,6 +367,15 @@ export default function App() {
         case 'retry':
           setRetries((r) => [...r, { edge: String(e.edge), used: Number(e.used) }]);
           break;
+        case 'agent_usage':
+          setUsage((u) => ({
+            ...u,
+            [String(e.role)]: { costUsd: Number(e.costUsd), turns: Number(e.turns) },
+          }));
+          break;
+        case 'run_usage':
+          setTotalCost(Number(e.costUsd));
+          break;
         case 'needs_approval': {
           const current = repoRef.current;
           if (current) {
@@ -350,7 +421,10 @@ export default function App() {
     setBlocked(null);
     setDone(null);
     setError(null);
-    const result = await window.power.startRun(dir, goal.trim());
+    setUsage({});
+    setTotalCost(0);
+    setRunFeatures(features);
+    const result = await window.power.startRun(dir, goal.trim(), features);
     if (!result.ok) {
       setError(result.error ?? 'could not start');
     } else {
@@ -437,9 +511,15 @@ export default function App() {
                     setRepo(h.repoDir);
                     setView('home');
                   }}
-                  className="block w-full truncate rounded-lg px-2.5 py-2 text-left text-[13px] text-bodytext transition-colors hover:bg-raised hover:text-ink"
+                  className="block w-full rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-raised"
                 >
-                  {h.goal}
+                  <span className="block truncate text-[13px] text-bodytext">{h.goal}</span>
+                  {(h.outcome || h.costUsd) && (
+                    <span className="block text-[10.5px] text-mutedtext">
+                      {h.outcome ?? ''}
+                      {h.costUsd ? ` · $${h.costUsd.toFixed(2)}` : ''}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -473,7 +553,7 @@ export default function App() {
                   <span
                     aria-hidden="true"
                     className={`h-2 w-2 shrink-0 rounded-full ${
-                      blocked
+                      blocked || error
                         ? 'bg-accent-soft'
                         : done
                           ? 'bg-emerald-400'
@@ -481,14 +561,33 @@ export default function App() {
                     }`}
                   />
                   <span className="truncate text-[13px] font-medium text-ink">{goal}</span>
+                  {offSummary(runFeatures) && (
+                    <span className="hidden shrink-0 rounded-md border border-hairline bg-canvas/60 px-2 py-0.5 text-[11px] text-mutedtext lg:block">
+                      {offSummary(runFeatures)}
+                    </span>
+                  )}
+                  {totalCost > 0 && (
+                    <span className="shrink-0 font-mono text-[12px] text-mutedtext">
+                      ${totalCost.toFixed(2)}
+                    </span>
+                  )}
                   {repo && (
                     <span className="hidden shrink-0 rounded-md border border-hairline bg-canvas/60 px-2 py-0.5 font-mono text-[11px] text-mutedtext md:block">
                       {repo.split('/').slice(-1)[0]}
                     </span>
                   )}
                   <span className="shrink-0 text-[12px] text-mutedtext">
-                    {blocked ? 'blocked' : done ? 'complete' : 'running'}
+                    {error ? 'error' : blocked ? 'blocked' : done ? 'complete' : 'running'}
                   </span>
+                  {running && (
+                    <button
+                      type="button"
+                      onClick={() => void window.power.stop()}
+                      className="shrink-0 rounded-md border border-accent-soft/50 bg-accent-soft/10 px-2.5 py-1 text-[12px] font-medium text-accent-soft transition-colors hover:bg-accent-soft/20"
+                    >
+                      Stop
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -578,6 +677,56 @@ export default function App() {
                     placeholder="Describe what to build…"
                     className="w-full resize-none bg-transparent px-2 pt-1.5 text-[15px] text-ink placeholder:text-mutedtext focus:outline-none"
                   />
+                  {/* Options: every chip maps to something the engine honestly
+                      does — a skipped stage is recorded as skipped, never faked.
+                      Verify and the gates are deliberately not toggleable. */}
+                  <div className="flex flex-wrap items-center gap-1.5 px-1 pt-2 pb-1">
+                    <div
+                      role="radiogroup"
+                      aria-label="Model tier"
+                      className="mr-1 flex overflow-hidden rounded-lg border border-hairline"
+                    >
+                      {(['eco', 'balanced', 'max'] as const).map((tier) => (
+                        <button
+                          key={tier}
+                          type="button"
+                          role="radio"
+                          aria-checked={features.tier === tier}
+                          onClick={() => setFeature({ tier })}
+                          className={`px-2.5 py-1 text-[11.5px] font-medium capitalize transition-colors ${
+                            features.tier === tier
+                              ? 'bg-raised text-ink'
+                              : 'text-mutedtext hover:text-ink'
+                          }`}
+                        >
+                          {tier}
+                        </button>
+                      ))}
+                    </div>
+                    {(
+                      [
+                        ['research', 'Research', features.research],
+                        ['reviewTest', 'Review + Test', features.reviewTest],
+                        ['docs', 'Docs', features.docs],
+                        ['autoApprove', 'Auto-approve', features.autoApprove],
+                        ['packs', 'Packs', features.packs],
+                      ] as const
+                    ).map(([key, label, on]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => setFeature({ [key]: !on } as Partial<RunFeatures>)}
+                        className={`rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition-colors ${
+                          on
+                            ? 'border-accent-soft/50 bg-accent-soft/10 text-accent-soft'
+                            : 'border-hairline text-mutedtext hover:text-ink'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                   <div className="flex items-center justify-between px-1 pt-1">
                     <button
                       type="button"
@@ -687,6 +836,9 @@ export default function App() {
                       );
                     }
 
+                    const roleForStage = Object.entries(ROLE_STAGE).find(
+                      ([, st]) => st === id,
+                    )?.[0];
                     return (
                       <StageCard
                         key={id}
@@ -695,6 +847,7 @@ export default function App() {
                         lines={lines}
                         gate={gateHit}
                         retriesUsed={retryCount}
+                        usage={roleForStage ? usage[roleForStage] : undefined}
                       />
                     );
                   })}
@@ -726,6 +879,11 @@ export default function App() {
                     >
                       <p className="text-sm font-semibold text-ink">
                         Run complete — all gates passed.
+                        {totalCost > 0 && (
+                          <span className="ml-2 font-mono text-[12px] font-normal text-bodytext">
+                            ${totalCost.toFixed(2)} total
+                          </span>
+                        )}
                       </p>
                       <pre className="selectable mt-1 font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-bodytext">
                         {done.trim()}

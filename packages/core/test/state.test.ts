@@ -244,3 +244,24 @@ describe('persistence', () => {
     expect(before).toEqual(snapshot);
   });
 });
+
+describe('research_skipped', () => {
+  it('moves intake straight to spec and records the gate as skipped, not passed', () => {
+    const state = apply(createRunState('t', clock), { type: 'research_skipped' }, clock);
+    expect(state.phase).toBe('spec');
+    expect(state.gates.research).toBe('skipped');
+    expect(state.gates.research).not.toBe('pass');
+  });
+
+  it('is refused once research has started — a run cannot un-run research', () => {
+    let state = createRunState('t', clock);
+    state = apply(state, { type: 'start_research' }, clock);
+    expect(() => apply(state, { type: 'research_skipped' }, clock)).toThrow(StateError);
+  });
+
+  it('does not weaken the deploy guardrail', () => {
+    let state = apply(createRunState('t', clock), { type: 'research_skipped' }, clock);
+    // Even with research skipped, deploying still needs approval + self-verify + verification.
+    expect(canDeploy(state).allowed).toBe(false);
+  });
+});

@@ -17,7 +17,14 @@ import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { EngineOptions, Role, RunEvent, StageId } from './types.js';
+import {
+  DEFAULT_FEATURES,
+  type EngineOptions,
+  type Role,
+  type RunEvent,
+  type RunFeatures,
+  type StageId,
+} from './types.js';
 
 /**
  * Cost discipline, per role. The registry already decided researcher and
@@ -27,6 +34,12 @@ import type { EngineOptions, Role, RunEvent, StageId } from './types.js';
  * burning further budget on it is the retry loop's job to decide, not the
  * stage's.
  */
+const TIER_CAP_MULTIPLIER: Record<RunFeatures['tier'], number> = {
+  eco: 0.7,
+  balanced: 1,
+  max: 1.3,
+};
+
 const ROLE_MODEL: Record<string, string> = {
   researcher: 'sonnet',
   architect: 'opus',
@@ -52,6 +65,74 @@ const GATE_RETRY_EDGE: Record<string, string> = {
   verification: 'needs_fixes',
 };
 
+/** The headless dispatch argv, pure so tests can assert cost controls hold. */
+export function claudeArgs(
+  role: Role,
+  dispatch: string,
+  systemPrompt: string,
+  repoDir: string,
+  features: RunFeatures,
+): string[] {
+  const model = features.tier === 'eco' ? 'sonnet' : features.tier === 'max' ? 'opus' : (ROLE_MODEL[role] ?? 'sonnet');
+  const turns = Math.round((ROLE_MAX_TURNS[role] ?? 30) * TIER_CAP_MULTIPLIER[features.tier]);
+  return [
+    '-p',
+    dispatch,
+    '--append-system-prompt',
+    systemPrompt,
+    '--permission-mode',
+    'acceptEdits',
+    '--add-dir',
+    repoDir,
+    '--model',
+    model,
+    '--max-turns',
+    String(turns),
+    // stream-json is what makes cost visible: assistant frames carry the text
+    // the UI shows, and the final result frame carries total_cost_usd/num_turns.
+    '--output-format',
+    'stream-json',
+    '--verbose',
+  ];
+}
+
+/** One parsed stream-json line. Non-JSON input (mock agents) passes through raw. */
+export function parseStreamLine(
+  line: string,
+):
+  | { kind: 'text'; text: string }
+  | { kind: 'usage'; costUsd: number; turns: number }
+  | { kind: 'raw'; line: string }
+  | { kind: 'noise' } {
+  if (!line.startsWith('{')) return { kind: 'raw', line };
+  try {
+    const frame = JSON.parse(line) as {
+      type?: string;
+      message?: { content?: { type?: string; text?: string }[] };
+      total_cost_usd?: number;
+      num_turns?: number;
+    };
+    if (frame.type === 'assistant') {
+      const text = (frame.message?.content ?? [])
+        .filter((c) => c.type === 'text' && c.text)
+        .map((c) => c.text)
+        .join('\n')
+        .trim();
+      return text ? { kind: 'text', text } : { kind: 'noise' };
+    }
+    if (frame.type === 'result') {
+      return {
+        kind: 'usage',
+        costUsd: frame.total_cost_usd ?? 0,
+        turns: frame.num_turns ?? 0,
+      };
+    }
+    return { kind: 'noise' };
+  } catch {
+    return { kind: 'raw', line };
+  }
+}
+
 /** Exit codes from the wrappers: 0 pass, 1 refused/failed, 2 usage/env error. */
 class ToolFailure extends Error {
   constructor(
@@ -66,9 +147,12 @@ export class PowerRun extends EventEmitter {
   private approvalResolver: ((approved: { ok: boolean; reason?: string }) => void) | null = null;
   private stopped = false;
   private activeChild: ReturnType<typeof spawn> | null = null;
+  private readonly features: RunFeatures;
+  private totalCostUsd = 0;
 
   constructor(private readonly opts: EngineOptions) {
     super();
+    this.features = opts.features ?? DEFAULT_FEATURES;
   }
 
   private emitEvent(event: RunEvent): void {
@@ -165,25 +249,29 @@ export class PowerRun extends EventEmitter {
       ? this.opts.agentCommand(role, dispatch)
       : {
           cmd: 'claude',
-          args: [
-            '-p',
+          args: claudeArgs(
+            role,
             dispatch,
-            '--append-system-prompt',
             readFileSync(promptPath, 'utf8'),
-            '--permission-mode',
-            'acceptEdits',
-            '--add-dir',
             this.opts.repoDir,
-            '--model',
-            ROLE_MODEL[role] ?? 'sonnet',
-            '--max-turns',
-            String(ROLE_MAX_TURNS[role] ?? 30),
-          ],
+            this.features,
+          ),
         };
 
-    await this.exec(command.cmd, command.args, (line) =>
-      this.emitEvent({ type: 'agent', role, line }),
-    );
+    await this.exec(command.cmd, command.args, (line) => {
+      const parsed = parseStreamLine(line);
+      if (parsed.kind === 'text') {
+        for (const part of parsed.text.split('\n')) {
+          if (part.trim()) this.emitEvent({ type: 'agent', role, line: part });
+        }
+      } else if (parsed.kind === 'raw') {
+        this.emitEvent({ type: 'agent', role, line: parsed.line });
+      } else if (parsed.kind === 'usage') {
+        this.totalCostUsd += parsed.costUsd;
+        this.emitEvent({ type: 'agent_usage', role, costUsd: parsed.costUsd, turns: parsed.turns });
+        this.emitEvent({ type: 'run_usage', costUsd: this.totalCostUsd });
+      }
+    });
   }
 
   /**
@@ -281,25 +369,34 @@ export class PowerRun extends EventEmitter {
       await this.state(['init', goal]);
       this.stage('init', 'pass');
 
-      // ---- research ----
-      this.stage('research', 'start');
-      await this.state(['apply', '{"type":"start_research"}']);
+      // ---- research (or its honest skip) ----
       const brief = join(repoDir, '.power', 'artifacts', 'brief.json');
-      const researched = await this.gatedStage('research', 'researcher', [
-        `Goal: ${goal}`,
-        `Read the brief at ${brief} and resolve its unknowns[].`,
-        'Write research.json and research.md to the artifacts directory.',
-        'Every claim carries a source_url fetched on this run, listed in sources[].',
-      ]);
-      if (!researched) return this.stage('research', 'fail');
-      this.stage('research', 'pass');
-      await this.state(['apply', '{"type":"checkpoint_acknowledged"}']);
+      if (this.features.research) {
+        this.stage('research', 'start');
+        await this.state(['apply', '{"type":"start_research"}']);
+        const researched = await this.gatedStage('research', 'researcher', [
+          `Goal: ${goal}`,
+          `Read the brief at ${brief} and resolve its unknowns[].`,
+          'Write research.json and research.md to the artifacts directory.',
+          'Every claim carries a source_url fetched on this run, listed in sources[].',
+        ]);
+        if (!researched) return this.stage('research', 'fail');
+        this.stage('research', 'pass');
+        await this.state(['apply', '{"type":"checkpoint_acknowledged"}']);
+      } else {
+        // Recorded as skipped in the state file — never faked as passed.
+        await this.state(['apply', '{"type":"research_skipped"}']);
+      }
 
       // ---- spec ----
       this.stage('spec', 'start');
       const specced = await this.gatedStage('spec', 'architect', [
         `Goal: ${goal}`,
-        'Read brief.json, research.json, and research.md from the artifacts directory.',
+        this.features.research
+          ? 'Read brief.json, research.json, and research.md from the artifacts directory.'
+          : 'No research ran on this run (skipped by run options). Read brief.json, decide ' +
+            'from the goal and your own judgement, and record every assumption you make ' +
+            'in the Open Questions section.',
         'Write SPEC.md there: YAML frontmatter with requirement_ids, all twelve required',
         'sections, at least one EARS criterion per requirement inside its own heading',
         'block, and tasks that each cite a real R#.',
@@ -310,7 +407,11 @@ export class PowerRun extends EventEmitter {
       // ---- the one human gate ----
       this.stage('approval', 'start');
       const specPath = join(repoDir, '.power', 'artifacts', 'SPEC.md');
-      const verdict = await this.awaitApproval(specPath);
+      // Auto-approve skips only the human pause. The reducer still refuses an
+      // approval whose spec gate has not passed, so this cannot loosen anything.
+      const verdict = this.features.autoApprove
+        ? { ok: true as const }
+        : await this.awaitApproval(specPath);
       if (!verdict.ok) {
         await this.state([
           'apply',
@@ -337,27 +438,45 @@ export class PowerRun extends EventEmitter {
 
       // ---- build ----
       this.stage('implement', 'start');
-      await this.dispatch('implementer', [
+      const implementerBrief = [
         `Goal: ${goal}`,
         `Read ${specPath} and implement every P0 task, in the repository root.`,
         'Run your own build and tests before reporting. Report actual output.',
-      ]);
+      ];
+      if (this.features.packs) {
+        try {
+          const catalogue = await this.exec('node', [
+            join(this.opts.powerRoot, 'packages', 'knowledge', 'dist', 'cli.js'),
+            'selector',
+          ]);
+          implementerBrief.push(
+            '',
+            'Capability packs available to you (read the matching ones before implementing):',
+            catalogue.slice(0, 30_000),
+          );
+        } catch {
+          /* packs are an enhancement, never a blocker */
+        }
+      }
+      await this.dispatch('implementer', implementerBrief);
       await this.state(['apply', '{"type":"self_verify","green":true}']);
       this.stage('implement', 'pass');
 
-      // ---- review + test ----
-      this.stage('review', 'start');
-      this.stage('test', 'start');
-      await Promise.all([
-        this.dispatch('reviewer', [
-          'Review the implementation against SPEC.md. Write review.json to the artifacts directory.',
-        ]),
-        this.dispatch('tester', [
-          'Run the test suite and exercise the spec’s criteria. Write test-report.json to the artifacts directory.',
-        ]),
-      ]);
-      this.stage('review', 'pass');
-      this.stage('test', 'pass');
+      // ---- review + test (skippable, engine-side only) ----
+      if (this.features.reviewTest) {
+        this.stage('review', 'start');
+        this.stage('test', 'start');
+        await Promise.all([
+          this.dispatch('reviewer', [
+            'Review the implementation against SPEC.md. Write review.json to the artifacts directory.',
+          ]),
+          this.dispatch('tester', [
+            'Run the test suite and exercise the spec’s criteria. Write test-report.json to the artifacts directory.',
+          ]),
+        ]);
+        this.stage('review', 'pass');
+        this.stage('test', 'pass');
+      }
 
       // ---- verify ----
       this.stage('verify', 'start');
@@ -369,13 +488,15 @@ export class PowerRun extends EventEmitter {
       if (!verified) return this.stage('verify', 'fail');
       this.stage('verify', 'pass');
 
-      // ---- document ----
-      this.stage('document', 'start');
-      await this.dispatch('documenter', [
-        'Document the system as built: README at the repository root.',
-        'Verify every command you write down by running it. Flag spec divergences.',
-      ]);
-      this.stage('document', 'pass');
+      // ---- document (skippable) ----
+      if (this.features.docs) {
+        this.stage('document', 'start');
+        await this.dispatch('documenter', [
+          'Document the system as built: README at the repository root.',
+          'Verify every command you write down by running it. Flag spec divergences.',
+        ]);
+        this.stage('document', 'pass');
+      }
 
       const finalState = await this.state(['show']);
       this.emitEvent({ type: 'state', raw: finalState });
