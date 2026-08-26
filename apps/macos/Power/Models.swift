@@ -183,6 +183,12 @@ enum PowerPaths {
             candidates.append(URL(fileURLWithPath: root))
         }
         candidates.append(home.appendingPathComponent("Library/power"))
+        // The bundled runtime: dependency-free CLI bundles + agents/ + schemas,
+        // copied into Resources as a folder reference. This is what makes the
+        // exported project self-contained — it needs no Power repo on disk.
+        if let bundled = Bundle.main.resourceURL?.appendingPathComponent("runtime") {
+            candidates.insert(bundled, at: 0)
+        }
 
         return candidates.first {
             fm.fileExists(atPath: $0.appendingPathComponent("packages/core/dist/cli.js").path)
