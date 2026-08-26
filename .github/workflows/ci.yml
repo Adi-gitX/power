@@ -73,3 +73,70 @@ jobs:
             fi
           done
           echo "golden fixtures pass and broken fixtures fail, as expected"
+
+  # The website must build and its copy must be present in the static HTML —
+  # if the headline is not in out/index.html, crawlers never see it.
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:web
+      - name: Copy is in the static HTML
+        run: |
+          for s in "You describe." "Gates decide." "plugin install power"; do
+            grep -qF "$s" apps/web/out/index.html || { echo "::error::'$s' missing from static HTML"; exit 1; }
+          done
+
+  # The Swift engine must stay a faithful peer of the TS engine (ADR 0005):
+  # typecheck every file, then run the full mock pipeline — real state
+  # machine, real gates — headlessly on the macOS runner.
+  swift:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck   # builds the dist CLIs the Swift engine calls
+      - name: Typecheck Swift sources
+        run: swiftc -typecheck -sdk $(xcrun --show-sdk-path) -parse-as-library apps/macos/Power/*.swift
+      - name: Headless Swift pipeline (mock agents, real gates)
+        run: |
+          cat > /tmp/Smoke.swift << 'SWIFT'
+          import Foundation
+          @main struct Smoke {
+              static func main() async throws {
+                  setenv("POWER_MOCK_AGENTS", "1", 1)
+                  setenv("POWER_ROOT", FileManager.default.currentDirectoryPath, 1)
+                  let repo = NSTemporaryDirectory() + UUID().uuidString
+                  try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+                  let engine = await RunEngine()
+                  await engine.start(goal: "ci smoke: csv to json cli", repoDir: repo, features: RunFeatures())
+                  for _ in 0..<900 {
+                      try await Task.sleep(for: .milliseconds(200))
+                      if await engine.specText != nil { await engine.approve() }
+                      if await !engine.running { break }
+                  }
+                  guard await engine.done?.contains("deployable   yes") == true,
+                        await engine.gates.count == 3 else {
+                      print("FAIL"); exit(1)
+                  }
+                  print("PASS: 3 gates, deployable yes")
+              }
+          }
+          SWIFT
+          swiftc -o /tmp/smoke -parse-as-library apps/macos/Power/Engine.swift apps/macos/Power/Models.swift /tmp/Smoke.swift
+          /tmp/smoke

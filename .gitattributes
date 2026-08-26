@@ -1,0 +1,4 @@
+# Generated from packages/agents — rebuilt and diffed in CI; collapse in review.
+agents/** linguist-generated=true
+skills/power/reference/** linguist-generated=true
+pnpm-lock.yaml linguist-generated=true

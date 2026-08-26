@@ -11,7 +11,13 @@
     "test": "vitest run",
     "validate": "pnpm --filter @power/agents run validate && pnpm --filter @power/knowledge run validate",
     "build:plugin": "pnpm --filter @power/agents run build:plugin",
-    "check": "pnpm typecheck && pnpm validate && pnpm test"
+    "check": "pnpm typecheck && pnpm validate && pnpm test",
+    "dev:desktop": "pnpm --filter @power/desktop dev",
+    "dev:web": "pnpm --filter @power/web dev",
+    "build:desktop": "pnpm --filter @power/desktop build",
+    "build:web": "pnpm --filter @power/web build",
+    "package:desktop": "pnpm --filter @power/desktop package",
+    "export:xcode": "node tools/export-xcode.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
@@ -24,5 +30,6 @@
       "electron",
       "esbuild"
     ]
-  }
+  },
+  "license": "SEE LICENSE IN LICENSE"
 }
