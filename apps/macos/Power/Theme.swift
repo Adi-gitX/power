@@ -28,4 +28,11 @@ extension Color {
     static let accent = Color(hex: 0xC96442)
     static let accentSoft = Color(hex: 0xE0784F)
     static let pass = Color(hex: 0x34D399)
+
+    // Floating orb colors — vivid at full opacity, the blur + compositing
+    // dims them to the ambient glow the onboarding background needs.
+    static let orbBlue = Color(red: 0.15, green: 0.25, blue: 1.0)
+    static let orbGreen = Color(red: 0.1, green: 0.75, blue: 0.45)
+    static let orbOrange = Color(red: 0.95, green: 0.45, blue: 0.1)
+    static let orbPink = Color(red: 0.85, green: 0.15, blue: 0.35)
 }

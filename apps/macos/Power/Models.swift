@@ -49,11 +49,11 @@ struct RunFeatures: Codable, Equatable {
 
 /// The eight specialists, by plugin short name — the same names as
 /// `agents/<role>.md`, whose file is the dispatched system prompt.
-enum Role: String, CaseIterable {
+enum Role: String, Codable, CaseIterable {
     case researcher, architect, implementer, reviewer, tester, verifier, documenter
 }
 
-enum StageID: String, CaseIterable, Identifiable {
+enum StageID: String, Codable, CaseIterable, Identifiable {
     case research, spec, approval, implement, review, test, verify, document
 
     var id: String { rawValue }
@@ -123,6 +123,90 @@ struct HistoryRow: Codable, Identifiable {
     let at: String
     var outcome: String?
     var costUsd: Double?
+    /// Session title, ChatGPT-style. Optional so rows written before titles
+    /// existed decode fine — `displayTitle` gives every row a title regardless.
+    var title: String?
+
+    /// What the sidebar shows: the stored title, or a heuristic one derived
+    /// from the goal on the spot. Old history needs no migration.
+    var displayTitle: String { title ?? TitleMaker.quick(goal) }
+}
+
+/// Session titles. Two tiers, by design:
+///   - `quick` is a zero-cost heuristic, applied instantly and used as the
+///     permanent fallback — every row always has a title.
+///   - `generate` asks haiku for a better one (~$0.001), fire-and-forget when
+///     a run starts; on any failure the heuristic simply stands. Never called
+///     in mock mode, so tests and demos stay free.
+enum TitleMaker {
+    private static let filler: Set<String> = [
+        "build", "create", "make", "write", "implement", "develop", "generate",
+        "add", "i", "want", "need", "to", "please", "me", "my", "a", "an", "the",
+        "app", "that", "can", "help", "us", "for",
+    ]
+    private static let smallWords: Set<String> = [
+        "a", "an", "the", "for", "of", "to", "in", "on", "with", "and", "or",
+    ]
+
+    static func quick(_ goal: String) -> String {
+        var words = goal
+            .replacingOccurrences(of: "[\"\n]", with: " ", options: .regularExpression)
+            .split(separator: " ").map(String.init)
+        // Peel leading filler ("build me a", "i want to create a") until a
+        // content word surfaces, but never peel the whole goal away.
+        while words.count > 2, filler.contains(words[0].lowercased()) {
+            words.removeFirst()
+        }
+        var out: [String] = []
+        var length = 0
+        for (i, word) in words.enumerated() {
+            if length + word.count + 1 > 45 { break }
+            let lower = word.lowercased()
+            out.append(
+                i > 0 && smallWords.contains(lower)
+                    ? lower
+                    : word.prefix(1).uppercased() + word.dropFirst()
+            )
+            length += word.count + 1
+        }
+        let result = out.joined(separator: " ")
+        return result.isEmpty ? String(goal.prefix(45)) : result
+    }
+
+    /// One tiny haiku call. Any failure (CLI missing, model alias unknown,
+    /// junk output) returns nil and the heuristic remains — titles must never
+    /// cost a retry or block anything.
+    static func generate(for goal: String) async -> String? {
+        await withCheckedContinuation { continuation in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = [
+                "claude", "-p",
+                "Reply with ONLY a 3-6 word title (no quotes, no punctuation at the end) for this software build request: \(goal)",
+                "--model", "haiku",
+            ]
+            var env = ProcessInfo.processInfo.environment
+            env["PATH"] = PowerPaths.spawnPATH
+            process.environment = env
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = Pipe()
+            process.terminationHandler = { proc in
+                guard proc.terminationStatus == 0,
+                      let raw = String(
+                        data: pipe.fileHandleForReading.readDataToEndOfFile(),
+                        encoding: .utf8
+                      )
+                else { return continuation.resume(returning: nil) }
+                let title = raw
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\"'.“”"))
+                let valid = !title.isEmpty && title.count <= 60 && !title.contains("\n")
+                continuation.resume(returning: valid ? title : nil)
+            }
+            do { try process.run() } catch { continuation.resume(returning: nil) }
+        }
+    }
 }
 
 /// Recent runs, one JSON file in Application Support — the same shape the
@@ -156,11 +240,49 @@ enum HistoryStore {
         write(rows)
     }
 
+    /// Attach a generated title to the row it belongs to — matched by id, not
+    /// position, because the upgrade arrives asynchronously and another run
+    /// may have started since.
+    static func setTitle(_ title: String, forRowAt id: String) {
+        var rows = read()
+        guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
+        rows[index].title = title
+        write(rows)
+    }
+
+    /// Posted whenever the history file changes outside the UI's own actions
+    /// (e.g. a generated title landing), so sidebars can re-read.
+    static let powerHistoryChanged = Notification.Name("powerHistoryChanged")
+
     private static func write(_ rows: [HistoryRow]) {
         if let data = try? JSONEncoder().encode(rows) {
             try? data.write(to: url)
         }
     }
+}
+
+// MARK: - Chat
+
+struct ChatMessage: Identifiable {
+    let id = UUID()
+    let role: ChatRole
+    let text: String
+
+    enum ChatRole { case user, assistant }
+}
+
+struct CodeEditor: Identifiable {
+    let id: String   // bundle identifier
+    let name: String
+    let icon: String // SF Symbol name
+
+    static let known: [CodeEditor] = [
+        CodeEditor(id: "com.microsoft.VSCode", name: "VS Code", icon: "curlybraces"),
+        CodeEditor(id: "com.microsoft.VSCodeInsiders", name: "VS Code Insiders", icon: "curlybraces"),
+        CodeEditor(id: "com.todesktop.230313mzl4w4u92", name: "Cursor", icon: "cursorarrow.rays"),
+        CodeEditor(id: "dev.zed.Zed", name: "Zed", icon: "bolt"),
+        CodeEditor(id: "com.apple.dt.Xcode", name: "Xcode", icon: "hammer"),
+    ]
 }
 
 // MARK: - Paths
@@ -202,4 +324,10 @@ enum PowerPaths {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return "\(inherited):/opt/homebrew/bin:/usr/local/bin:\(home)/.local/bin"
     }
+}
+
+extension Notification.Name {
+    /// Posted whenever the history file changes outside the UI's own actions
+    /// (e.g. a generated title landing), so sidebars can re-read.
+    static let powerHistoryChanged = Notification.Name("powerHistoryChanged")
 }

@@ -16,3 +16,7 @@ next-env.d.ts
 # Electron
 apps/desktop/out/
 apps/desktop/release/
+
+# Xcode user state
+xcuserdata/
+project.xcworkspace/

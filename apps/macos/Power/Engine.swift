@@ -105,11 +105,25 @@ final class RunEngine: ObservableObject {
         stopped = false
         running = true
 
+        let rowId = ISO8601DateFormatter().string(from: .now)
         HistoryStore.record(HistoryRow(
-            goal: goal, repoDir: repoDir,
-            at: ISO8601DateFormatter().string(from: .now),
-            outcome: nil, costUsd: nil
+            goal: goal, repoDir: repoDir, at: rowId,
+            outcome: nil, costUsd: nil,
+            title: TitleMaker.quick(goal)
         ))
+
+        // A better title arrives when haiku answers; the heuristic stands if it
+        // never does. Skipped in mock mode so tests and demos stay free.
+        if ProcessInfo.processInfo.environment["POWER_MOCK_AGENTS"] != "1" {
+            Task.detached {
+                if let title = await TitleMaker.generate(for: goal) {
+                    await MainActor.run {
+                        HistoryStore.setTitle(title, forRowAt: rowId)
+                        NotificationCenter.default.post(name: .powerHistoryChanged, object: nil)
+                    }
+                }
+            }
+        }
 
         Task { await run() }
     }
