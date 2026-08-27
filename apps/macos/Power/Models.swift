@@ -100,18 +100,56 @@ enum StageID: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum StageStatus {
+enum StageStatus: String, Codable {
     case running, pass, fail
 }
 
-struct GateResult: Equatable {
+struct GateResult: Equatable, Codable {
     let pass: Bool
     let detail: String
 }
 
-struct StageUsage: Equatable {
+struct StageUsage: Equatable, Codable {
     var costUsd: Double
     var turns: Int
+}
+
+// MARK: - Run snapshots (persist full timeline for session restore)
+
+struct RunSnapshot: Codable {
+    let stageOrder: [StageID]
+    let stages: [StageID: StageStatus]
+    let lines: [StageID: [String]]
+    let gates: [StageID: GateResult]
+    let retries: [StageID: Int]
+    let usage: [Role: StageUsage]
+    let totalCostUsd: Double
+    let blocked: String?
+    let done: String?
+}
+
+enum SnapshotStore {
+    private static var dir: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Power/snapshots", isDirectory: true)
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base
+    }
+
+    static func save(_ snapshot: RunSnapshot, id: String) {
+        let safe = id.replacingOccurrences(of: ":", with: "-")
+        let url = dir.appendingPathComponent("\(safe).json")
+        if let data = try? JSONEncoder().encode(snapshot) {
+            try? data.write(to: url)
+        }
+    }
+
+    static func load(id: String) -> RunSnapshot? {
+        let safe = id.replacingOccurrences(of: ":", with: "-")
+        let url = dir.appendingPathComponent("\(safe).json")
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(RunSnapshot.self, from: data)
+    }
 }
 
 // MARK: - History
@@ -240,6 +278,16 @@ enum HistoryStore {
         write(rows)
     }
 
+    /// Stamp a specific session — position 0 is wrong the moment an older
+    /// session is continued while newer rows exist above it.
+    static func stamp(id: String, outcome: String, costUsd: Double) {
+        var rows = read()
+        guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
+        rows[index].outcome = outcome
+        rows[index].costUsd = (rows[index].costUsd ?? 0) + costUsd
+        write(rows)
+    }
+
     /// Attach a generated title to the row it belongs to — matched by id, not
     /// position, because the upgrade arrives asynchronously and another run
     /// may have started since.
@@ -323,6 +371,117 @@ enum PowerPaths {
         let inherited = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return "\(inherited):/opt/homebrew/bin:/usr/local/bin:\(home)/.local/bin"
+    }
+}
+
+// MARK: - Session transcripts
+
+/// One line of the durable session chat — what "click a title and see the
+/// entire agent conversation" reads from. Stored per session in Application
+/// Support, so transcripts survive the repo being moved or deleted.
+struct TranscriptEntry: Codable {
+    let role: String   // "user" | "assistant"
+    let text: String
+    let at: String
+}
+
+enum TranscriptStore {
+    private static func url(_ id: String) -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Power/sessions", isDirectory: true)
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        // Session ids are ISO timestamps; strip the characters HFS dislikes.
+        let safe = id.replacingOccurrences(of: ":", with: "-")
+        return base.appendingPathComponent("\(safe).json")
+    }
+
+    static func read(_ id: String) -> [TranscriptEntry] {
+        guard let data = try? Data(contentsOf: url(id)),
+              let rows = try? JSONDecoder().decode([TranscriptEntry].self, from: data)
+        else { return [] }
+        return rows
+    }
+
+    static func append(_ role: String, _ text: String, to id: String) {
+        var rows = read(id)
+        rows.append(TranscriptEntry(
+            role: role, text: text,
+            at: ISO8601DateFormatter().string(from: .now)
+        ))
+        if let data = try? JSONEncoder().encode(rows) {
+            try? data.write(to: url(id))
+        }
+    }
+}
+
+// MARK: - Launchers
+
+/// Open the session's repo in VS Code, falling back through the known editors.
+enum EditorLauncher {
+    @discardableResult
+    static func openVSCode(_ repoDir: String) -> Bool {
+        openWith(bundleId: "com.microsoft.VSCode", path: repoDir)
+            || openWith(bundleId: "com.microsoft.VSCodeInsiders", path: repoDir)
+            || openWith(bundleId: "com.todesktop.230313mzl4w4u92", path: repoDir) // Cursor
+    }
+
+    static func openWith(bundleId: String, path: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-b", bundleId, path]
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch { return false }
+    }
+}
+
+/// Open a preview of what the run built, in Chrome.
+///
+/// Resolution is honest about what it can know: a static entry point in the
+/// repo wins (the common case for what Power builds); otherwise the local dev
+/// port. Chrome by request; the system default browser is the fallback so the
+/// button never dead-ends on a machine without Chrome.
+enum PreviewLauncher {
+    static let entryCandidates = [
+        "index.html", "out/index.html", "dist/index.html",
+        "build/index.html", "public/index.html",
+    ]
+
+    /// What the button will open, for tooltips and tests.
+    static func resolve(_ repoDir: String) -> URL {
+        for candidate in entryCandidates {
+            let path = "\(repoDir)/\(candidate)"
+            if FileManager.default.fileExists(atPath: path) {
+                return URL(fileURLWithPath: path)
+            }
+        }
+        return URL(string: "http://localhost:3000")!
+    }
+
+    @discardableResult
+    static func openInChrome(_ repoDir: String) -> Bool {
+        let target = resolve(repoDir)
+        let arg = target.isFileURL ? target.path : target.absoluteString
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-b", "com.google.Chrome", arg]
+        do {
+            try process.run()
+            process.waitUntilExit()
+            if process.terminationStatus == 0 { return true }
+        } catch {}
+        // No Chrome — the default browser beats a dead button.
+        NSWorkspaceOpen(arg)
+        return false
+    }
+
+    private static func NSWorkspaceOpen(_ arg: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = [arg]
+        try? process.run()
     }
 }
 

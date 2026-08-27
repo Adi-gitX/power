@@ -24,6 +24,10 @@ struct ContentView: View {
     @State private var selectedSession: HistoryRow?
     @State private var chatMessages: [ChatMessage] = []
     @State private var isChatting = false
+    /// Input-bar mode inside a session: Chat = one lightweight follow-up turn;
+    /// Build = the full gated pipeline continuing in this repo and transcript.
+    @State private var buildMode = false
+    @State private var continuingSession: HistoryRow?
 
     enum MainView: Equatable { case home, run, chat }
 
@@ -61,6 +65,18 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .powerHistoryChanged)) { _ in
             history = HistoryStore.read()
+        }
+        .onChange(of: engine.running) {
+            // A continuation returns home to its chat, transcript refreshed —
+            // the pipeline was a passage in the conversation, not a new place.
+            if !engine.running, let session = continuingSession {
+                chatMessages = TranscriptStore.read(session.id).map {
+                    ChatMessage(role: $0.role == "user" ? .user : .assistant, text: $0.text)
+                }
+                selectedSession = HistoryStore.read().first { $0.id == session.id } ?? session
+                continuingSession = nil
+                withAnimation(.spring(response: 0.35)) { currentView = .chat }
+            }
         }
         .onChange(of: engine.running) {
             history = HistoryStore.read()
@@ -131,10 +147,16 @@ struct ContentView: View {
                             withAnimation(.spring(response: 0.35)) {
                                 repoDir = row.repoDir
                                 if row.outcome != nil {
-                                    // Completed session — restore it
+                                    // Completed session — restore the full agent
+                                    // conversation from the durable transcript.
                                     goal = ""
                                     selectedSession = row
-                                    chatMessages = []
+                                    chatMessages = TranscriptStore.read(row.id).map {
+                                        ChatMessage(
+                                            role: $0.role == "user" ? .user : .assistant,
+                                            text: $0.text
+                                        )
+                                    }
                                     currentView = .chat
                                     showPreview = true
                                     refreshPreviewFiles()
@@ -463,6 +485,53 @@ struct ContentView: View {
             }
 
             Spacer()
+
+            // Chat = one follow-up turn · Build = the full gated pipeline.
+            HStack(spacing: 0) {
+                ForEach([false, true], id: \.self) { mode in
+                    Button(mode ? "Build" : "Chat") { buildMode = mode }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(buildMode == mode ? Color.ink : Color.mutedText)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(buildMode == mode ? Color.raised : .clear)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.hairline))
+            .help("Chat answers a question in one turn. Build runs the full gated pipeline on your next instruction.")
+
+            Button {
+                if let dir = repoDir { EditorLauncher.openVSCode(dir) }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "curlybraces")
+                        .font(.system(size: 11))
+                    Text("VS Code")
+                        .font(.system(size: 12))
+                }
+                .foregroundStyle(Color.mutedText)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.raised.opacity(0.5)))
+            }
+            .buttonStyle(ScaleButtonStyle())
+            .help("Open this session's repository in VS Code")
+
+            Button {
+                if let dir = repoDir { PreviewLauncher.openInChrome(dir) }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "safari")
+                        .font(.system(size: 11))
+                    Text("Preview")
+                        .font(.system(size: 12))
+                }
+                .foregroundStyle(Color.mutedText)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.raised.opacity(0.5)))
+            }
+            .buttonStyle(ScaleButtonStyle())
+            .help(repoDir.map { "Opens \(PreviewLauncher.resolve($0).lastPathComponent) in Chrome" } ?? "Opens the preview in Chrome")
 
             editorMenu
 
@@ -965,10 +1034,27 @@ struct ContentView: View {
 
     private func handleSubmit() {
         if currentView == .chat {
-            sendChat()
+            if buildMode { continueBuild() } else { sendChat() }
         } else if !engine.running {
             startRun()
         }
+    }
+
+    /// The full gated pipeline, continuing this session: same repo, same
+    /// transcript, same title — the previous run's state archived, its
+    /// artifacts kept so the next implementation builds on what exists.
+    private func continueBuild() {
+        let message = goal.trimmingCharacters(in: .whitespaces)
+        guard message.count >= 8, let session = selectedSession, !engine.running else { return }
+        goal = message
+        continuingSession = session
+        engine.start(
+            goal: message,
+            repoDir: session.repoDir,
+            features: features,
+            continuingSession: session.id
+        )
+        withAnimation(.spring(response: 0.35)) { currentView = .run }
     }
 
     // MARK: Chat (lightweight Claude CLI follow-up)
@@ -978,12 +1064,14 @@ struct ContentView: View {
         guard !message.isEmpty, let dir = repoDir, !isChatting else { return }
 
         chatMessages.append(ChatMessage(role: .user, text: message))
+        if let id = selectedSession?.id { TranscriptStore.append("user", message, to: id) }
         goal = ""
         isChatting = true
 
         Task {
             let response = await runChatCommand(message: message, repoDir: dir)
             chatMessages.append(ChatMessage(role: .assistant, text: response))
+            if let id = selectedSession?.id { TranscriptStore.append("assistant", response, to: id) }
             isChatting = false
             if showPreview { refreshPreviewFiles() }
         }

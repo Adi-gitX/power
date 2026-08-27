@@ -39,6 +39,15 @@ final class RunEngine: ObservableObject {
     private var goal = ""
     private var features = RunFeatures()
     private var powerRoot: URL!
+    /// The history row / transcript this run belongs to. A continuation reuses
+    /// the original session's id, which is what makes one title accumulate an
+    /// entire conversation of runs.
+    private(set) var sessionId = ""
+
+    private func transcript(_ role: String, _ text: String) {
+        guard !sessionId.isEmpty else { return }
+        TranscriptStore.append(role, text, to: sessionId)
+    }
 
     // MARK: Cost discipline (mirrors runner.ts)
 
@@ -89,7 +98,12 @@ final class RunEngine: ObservableObject {
 
     // MARK: The pipeline
 
-    func start(goal: String, repoDir: String, features: RunFeatures) {
+    func start(
+        goal: String,
+        repoDir: String,
+        features: RunFeatures,
+        continuingSession: String? = nil
+    ) {
         guard !running else { return }
         guard let root = PowerPaths.resolveRoot() else {
             errorText = "Power root not found. Set POWER_ROOT or ~/.power-desktop.json, or keep the repo at ~/Library/power."
@@ -99,22 +113,45 @@ final class RunEngine: ObservableObject {
         self.goal = goal
         self.repoDir = repoDir
         self.features = features
+
+        // A continuation archives the finished run's state file — the reducer
+        // rightly refuses to init over a live run — and keeps the artifacts in
+        // place so the next run builds on what exists.
+        if continuingSession != nil {
+            let fm = FileManager.default
+            let statePath = "\(repoDir)/.power/run.json"
+            if fm.fileExists(atPath: statePath) {
+                let archive = "\(repoDir)/.power/runs-archive"
+                try? fm.createDirectory(atPath: archive, withIntermediateDirectories: true)
+                let stamp = ISO8601DateFormatter().string(from: .now)
+                    .replacingOccurrences(of: ":", with: "-")
+                try? fm.moveItem(atPath: statePath, toPath: "\(archive)/\(stamp).json")
+            }
+        }
         stages = [:]; stageOrder = []; lines = [:]; gates = [:]; retries = [:]
         usage = [:]; totalCostUsd = 0
         specText = nil; blocked = nil; done = nil; errorText = nil
         stopped = false
         running = true
 
-        let rowId = ISO8601DateFormatter().string(from: .now)
-        HistoryStore.record(HistoryRow(
-            goal: goal, repoDir: repoDir, at: rowId,
-            outcome: nil, costUsd: nil,
-            title: TitleMaker.quick(goal)
-        ))
+        let rowId: String
+        if let existing = continuingSession {
+            rowId = existing
+        } else {
+            rowId = ISO8601DateFormatter().string(from: .now)
+            HistoryStore.record(HistoryRow(
+                goal: goal, repoDir: repoDir, at: rowId,
+                outcome: nil, costUsd: nil,
+                title: TitleMaker.quick(goal)
+            ))
+        }
+        sessionId = rowId
+        transcript("user", goal)
 
         // A better title arrives when haiku answers; the heuristic stands if it
         // never does. Skipped in mock mode so tests and demos stay free.
-        if ProcessInfo.processInfo.environment["POWER_MOCK_AGENTS"] != "1" {
+        if continuingSession == nil,
+           ProcessInfo.processInfo.environment["POWER_MOCK_AGENTS"] != "1" {
             Task.detached {
                 if let title = await TitleMaker.generate(for: goal) {
                     await MainActor.run {
@@ -253,7 +290,9 @@ final class RunEngine: ObservableObject {
 
             let final = try await state(["show"])
             done = final
-            HistoryStore.stampLatest(outcome: "done", costUsd: totalCostUsd)
+            HistoryStore.stamp(id: sessionId, outcome: "done", costUsd: totalCostUsd)
+            transcript("assistant", "Run complete — all gates passed.\n\(final.trimmingCharacters(in: .whitespacesAndNewlines))")
+            NotificationCenter.default.post(name: .powerHistoryChanged, object: nil)
         } catch is CancellationError {
             // stopped
         } catch {
@@ -306,7 +345,9 @@ final class RunEngine: ObservableObject {
                 _ = try? await state(["apply",
                     #"{"type":"block","reason":"\#(gateName) gate unsatisfiable after retries"}"#])
                 blocked = "\(gateName) gate failed \(attempt + 1) times; retry budget spent.\n\(lastGateOutput)"
-                HistoryStore.stampLatest(outcome: "blocked", costUsd: totalCostUsd)
+                HistoryStore.stamp(id: sessionId, outcome: "blocked", costUsd: totalCostUsd)
+                transcript("assistant", "Run blocked: \(gateName) gate failed \(attempt + 1) times; retry budget spent.")
+                NotificationCenter.default.post(name: .powerHistoryChanged, object: nil)
                 return false
             }
         }
@@ -513,6 +554,19 @@ final class RunEngine: ObservableObject {
     private func setStage(_ stage: StageID, _ status: StageStatus) {
         if stages[stage] == nil { stageOrder.append(stage) }
         stages[stage] = status
+
+        // The durable chat: each stage lands in the transcript as it resolves,
+        // with its gate verdict, retries, and cost — this is what a restored
+        // session replays.
+        if status != .running {
+            var parts = [status == .pass ? "✓ \(stage.title)" : "✕ \(stage.title)"]
+            if let gate = gates[stage] { parts.append(gate.pass ? "gate PASS" : "gate FAIL") }
+            if let count = retries[stage], count > 0 { parts.append("retry \(count)/2") }
+            if let role = stage.role, let use = usage[role], use.costUsd > 0 {
+                parts.append(String(format: "$%.2f · %dt", use.costUsd, use.turns))
+            }
+            transcript("assistant", parts.joined(separator: " — "))
+        }
     }
 
     private func appendLine(_ line: String, to stage: StageID) {
