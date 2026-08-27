@@ -28,6 +28,11 @@ struct ContentView: View {
     /// Build = the full gated pipeline continuing in this repo and transcript.
     @State private var buildMode = false
     @State private var continuingSession: HistoryRow?
+    /// Right-pane workspace tab: the rendered page, or the file browser.
+    @State private var previewTab: PreviewTab = .render
+    @State private var webReloadToken = 0
+
+    enum PreviewTab { case render, files }
 
     enum MainView: Equatable { case home, run, chat }
 
@@ -75,7 +80,15 @@ struct ContentView: View {
                 }
                 selectedSession = HistoryStore.read().first { $0.id == session.id } ?? session
                 continuingSession = nil
-                withAnimation(.spring(response: 0.35)) { currentView = .chat }
+                // The build changed the code: re-render the preview and make
+                // sure the workspace is showing it.
+                webReloadToken += 1
+                refreshPreviewFiles()
+                withAnimation(.spring(response: 0.35)) {
+                    currentView = .chat
+                    showPreview = true
+                    previewTab = .render
+                }
             }
         }
         .onChange(of: engine.running) {
@@ -640,6 +653,23 @@ struct ContentView: View {
                         chatBubble(msg)
                     }
 
+                    // A Build continuation runs HERE, in the conversation:
+                    // live stage cards, the approval card included, exactly as
+                    // a fresh run renders them — one workspace, no mode switch.
+                    if continuingSession != nil {
+                        ForEach(engine.stageOrder) { stage in
+                            StageCardView(engine: engine, stage: stage, rejectReason: $rejectReason)
+                        }
+                        if let blocked = engine.blocked {
+                            Banner(icon: "exclamationmark.triangle", tint: .accentSoft,
+                                   title: "Run blocked", body: blocked)
+                        }
+                        if let error = engine.errorText {
+                            Banner(icon: "xmark.octagon", tint: .accentSoft,
+                                   title: "Error", body: error)
+                        }
+                    }
+
                     if isChatting {
                         HStack(spacing: 8) {
                             ProgressView().controlSize(.small).tint(Color.accent)
@@ -948,6 +978,74 @@ struct ContentView: View {
             .frame(height: 48)
             .overlay(Rectangle().fill(Color.hairline).frame(height: 1), alignment: .bottom)
 
+            // Workspace tabs: the rendered page (the Emergent-dashboard view),
+            // or the artifact/file browser.
+            HStack(spacing: 0) {
+                ForEach([PreviewTab.render, PreviewTab.files], id: \.self) { tab in
+                    Button {
+                        previewTab = tab
+                        if tab == .files { refreshPreviewFiles() }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: tab == .render ? "play.display" : "doc.text")
+                                .font(.system(size: 10.5))
+                            Text(tab == .render ? "Preview" : "Files")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundStyle(previewTab == tab ? Color.ink : Color.mutedText)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(previewTab == tab ? Color.raised : .clear)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+                if previewTab == .render, let dir = repoDir {
+                    Text(PreviewLauncher.resolve(dir).isFileURL
+                        ? PreviewLauncher.resolve(dir).lastPathComponent
+                        : "localhost:3000")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Color.mutedText)
+                    Button {
+                        webReloadToken += 1
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.mutedText)
+                    }
+                    .buttonStyle(ScaleButtonStyle())
+                    .help("Reload the preview")
+                    Button {
+                        PreviewLauncher.openInChrome(dir)
+                    } label: {
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.mutedText)
+                    }
+                    .buttonStyle(ScaleButtonStyle())
+                    .help("Open in Chrome")
+                    .padding(.trailing, 4)
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 34)
+            .overlay(Rectangle().fill(Color.hairline).frame(height: 1), alignment: .bottom)
+
+            if previewTab == .render {
+                if let dir = repoDir {
+                    WebPreview(repoDir: dir, reloadToken: webReloadToken)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    VStack {
+                        Spacer()
+                        Text("No repository selected")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color.mutedText)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            } else {
+
             // File tabs
             if !previewFiles.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -1005,9 +1103,12 @@ struct ContentView: View {
                     Spacer()
                 }
                 .frame(maxWidth: .infinity)
+                }
             }
         }
-        .frame(width: 350)
+        // A rendered page needs real estate; the file browser does not.
+        .frame(width: previewTab == .render ? 560 : 350)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: previewTab)
         .background(Color.panel.opacity(0.6))
     }
 
@@ -1046,7 +1147,8 @@ struct ContentView: View {
     private func continueBuild() {
         let message = goal.trimmingCharacters(in: .whitespaces)
         guard message.count >= 8, let session = selectedSession, !engine.running else { return }
-        goal = message
+        chatMessages.append(ChatMessage(role: .user, text: message))
+        goal = ""
         continuingSession = session
         engine.start(
             goal: message,
@@ -1054,7 +1156,9 @@ struct ContentView: View {
             features: features,
             continuingSession: session.id
         )
-        withAnimation(.spring(response: 0.35)) { currentView = .run }
+        // No screen switch: the pipeline is a passage in this conversation.
+        // Cards render inline in the chat column; the preview stays alongside.
+        withAnimation(.spring(response: 0.35)) { showPreview = true }
     }
 
     // MARK: Chat (lightweight Claude CLI follow-up)
