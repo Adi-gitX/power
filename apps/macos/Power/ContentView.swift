@@ -543,7 +543,13 @@ struct ContentView: View {
                     )
             }
 
-            if let cost = selectedSession?.costUsd, cost > 0 {
+            // Live cost while a continuation burns; the stamped total otherwise.
+            if continuingSession != nil, engine.totalCostUsd > 0 {
+                Text(String(format: "$%.2f", engine.totalCostUsd))
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(Color.accentSoft)
+                    .contentTransition(.numericText())
+            } else if let cost = selectedSession?.costUsd, cost > 0 {
                 Text(String(format: "$%.2f", cost))
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(Color.mutedText)
@@ -1257,27 +1263,50 @@ struct ContentView: View {
         }
     }
 
+    /// Chat sessions resume: the first turn establishes a claude session, and
+    /// every later turn talks to it warm — no context preamble re-sent, no
+    /// artifacts re-read, provider cache doing the heavy lifting. Session ids
+    /// are remembered per Power session across app launches.
+    private func chatClaudeSession(for id: String) -> String? {
+        (UserDefaults.standard.dictionary(forKey: "power.chatSessions") as? [String: String])?[id]
+    }
+
+    private func rememberChatSession(_ claudeId: String, for id: String) {
+        var map = (UserDefaults.standard.dictionary(forKey: "power.chatSessions") as? [String: String]) ?? [:]
+        map[id] = claudeId
+        UserDefaults.standard.set(map, forKey: "power.chatSessions")
+    }
+
     private func runChatCommand(message: String, repoDir: String) async -> String {
         await withCheckedContinuation { continuation in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
 
-            let artDir = "\(repoDir)/.power/artifacts"
-            var prompt = message
-            if FileManager.default.fileExists(atPath: artDir) {
-                prompt = "Context: previous Power run artifacts are at \(artDir). Refer to them if relevant.\n\n\(message)"
+            let resumeId = selectedSession.flatMap { chatClaudeSession(for: $0.id) }
+            var arguments = ["claude"]
+            if let resumeId {
+                // Warm turn: the session already knows the repo and the
+                // artifacts. The message IS the payload.
+                arguments += ["-p", message, "--resume", resumeId]
+            } else {
+                let artDir = "\(repoDir)/.power/artifacts"
+                var prompt = message
+                if FileManager.default.fileExists(atPath: artDir) {
+                    prompt = "Context: previous Power run artifacts are at \(artDir). Refer to them if relevant.\n\n\(message)"
+                }
+                arguments += ["-p", prompt]
             }
-
-            process.arguments = [
-                "claude", "-p", prompt,
+            arguments += [
                 "--allowedTools", "Edit,Write,Read,Bash,Glob,Grep",
                 "--permission-mode", "acceptEdits",
                 "--add-dir", repoDir,
                 "--model", "sonnet",
                 "--max-turns", "5",
-                "--output-format", "text",
-                "--verbose",
+                // json (not text): the result frame carries the session_id the
+                // next turn resumes.
+                "--output-format", "json",
             ]
+            process.arguments = arguments
 
             var env = ProcessInfo.processInfo.environment
             env["PATH"] = PowerPaths.spawnPATH
@@ -1290,6 +1319,18 @@ struct ContentView: View {
 
             process.terminationHandler = { _ in
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                // --output-format json: one object with the reply and the
+                // session to resume next turn. Fall back to raw text so a CLI
+                // change can never blank the chat.
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if let sid = json["session_id"] as? String,
+                       let powerId = self.selectedSession?.id {
+                        Task { @MainActor in self.rememberChatSession(sid, for: powerId) }
+                    }
+                    let reply = (json["result"] as? String)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    return continuation.resume(returning: reply?.isEmpty == false ? reply! : "(no output)")
+                }
                 let output = String(data: data, encoding: .utf8)?
                     .trimmingCharacters(in: .whitespacesAndNewlines) ?? "(no output)"
                 continuation.resume(returning: output)

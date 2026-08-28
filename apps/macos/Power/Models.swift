@@ -7,10 +7,10 @@ import Foundation
 /// deliberately not represented here — they cannot be turned off.
 struct RunFeatures: Codable, Equatable {
     enum Tier: String, Codable, CaseIterable {
-        case eco, balanced, max
+        case auto, eco, balanced, max
     }
 
-    var tier: Tier = .balanced
+    var tier: Tier = .auto
     var research = true
     var reviewTest = true
     var docs = true
@@ -24,7 +24,7 @@ struct RunFeatures: Codable, Equatable {
         if !reviewTest { parts.append("no review/test") }
         if !docs { parts.append("no docs") }
         if autoApprove { parts.append("auto-approve") }
-        if tier != .balanced { parts.append(tier.rawValue) }
+        if tier != .auto { parts.append(tier.rawValue) }
         return parts.joined(separator: " · ")
     }
 
@@ -112,6 +112,25 @@ struct GateResult: Equatable, Codable {
 struct StageUsage: Equatable, Codable {
     var costUsd: Double
     var turns: Int
+    var model: String = ""
+}
+
+/// Auto model policy: sonnet unless the goal's shape says the stage needs
+/// opus-class reasoning. Simple goals (short, no integration keywords) run
+/// entirely on sonnet — the welcome-page class of run gets several times
+/// cheaper with no observable quality change; complex goals keep the
+/// per-role map the registry chose.
+enum ModelPolicy {
+    static let complexityMarkers = [
+        "auth", "database", "payment", "stripe", "api", "backend", "server",
+        "realtime", "websocket", "dashboard", "login", "integration", "sync",
+        "multi", "search", "upload", "deploy",
+    ]
+
+    static func isComplex(_ goal: String) -> Bool {
+        let lower = goal.lowercased()
+        return goal.count > 90 || complexityMarkers.contains { lower.contains($0) }
+    }
 }
 
 // MARK: - Run snapshots (persist full timeline for session restore)

@@ -39,7 +39,7 @@ interface HistoryRow {
 }
 
 interface RunFeatures {
-  tier: 'eco' | 'balanced' | 'max';
+  tier: 'auto' | 'eco' | 'balanced' | 'max';
   research: boolean;
   reviewTest: boolean;
   docs: boolean;
@@ -48,7 +48,7 @@ interface RunFeatures {
 }
 
 const DEFAULT_FEATURES: RunFeatures = {
-  tier: 'balanced',
+  tier: 'auto',
   research: true,
   reviewTest: true,
   docs: true,
@@ -71,7 +71,7 @@ function offSummary(f: RunFeatures): string {
   if (!f.reviewTest) off.push('no review/test');
   if (!f.docs) off.push('no docs');
   if (f.autoApprove) off.push('auto-approve');
-  if (f.tier !== 'balanced') off.push(f.tier);
+  if (f.tier !== 'auto') off.push(f.tier);
   return off.join(' · ');
 }
 
@@ -686,7 +686,7 @@ export default function App() {
                       aria-label="Model tier"
                       className="mr-1 flex overflow-hidden rounded-lg border border-hairline"
                     >
-                      {(['eco', 'balanced', 'max'] as const).map((tier) => (
+                      {(['auto', 'eco', 'balanced', 'max'] as const).map((tier) => (
                         <button
                           key={tier}
                           type="button"

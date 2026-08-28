@@ -35,10 +35,22 @@ import {
  * stage's.
  */
 const TIER_CAP_MULTIPLIER: Record<RunFeatures['tier'], number> = {
+  auto: 1, // resolved per goal below
   eco: 0.7,
   balanced: 1,
   max: 1.3,
 };
+
+/** Mirror of the Swift ModelPolicy — the engines stay one product. */
+const COMPLEXITY_MARKERS = [
+  'auth', 'database', 'payment', 'stripe', 'api', 'backend', 'server',
+  'realtime', 'websocket', 'dashboard', 'login', 'integration', 'sync',
+  'multi', 'search', 'upload', 'deploy',
+];
+export function goalIsComplex(goal: string): boolean {
+  const lower = goal.toLowerCase();
+  return goal.length > 90 || COMPLEXITY_MARKERS.some((m) => lower.includes(m));
+}
 
 const ROLE_MODEL: Record<string, string> = {
   researcher: 'sonnet',
@@ -72,28 +84,40 @@ export function claudeArgs(
   systemPrompt: string,
   repoDir: string,
   features: RunFeatures,
+  goal = '',
+  resume?: string,
 ): string[] {
-  const model = features.tier === 'eco' ? 'sonnet' : features.tier === 'max' ? 'opus' : (ROLE_MODEL[role] ?? 'sonnet');
-  const turns = Math.round((ROLE_MAX_TURNS[role] ?? 30) * TIER_CAP_MULTIPLIER[features.tier]);
-  return [
-    '-p',
-    dispatch,
-    '--append-system-prompt',
-    systemPrompt,
+  const complex = goalIsComplex(goal);
+  const model =
+    features.tier === 'eco' ? 'sonnet'
+    : features.tier === 'max' ? 'opus'
+    : features.tier === 'auto' ? (complex ? (ROLE_MODEL[role] ?? 'sonnet') : 'sonnet')
+    : (ROLE_MODEL[role] ?? 'sonnet');
+  const mult = features.tier === 'auto' ? (complex ? 1 : 0.7) : TIER_CAP_MULTIPLIER[features.tier];
+  const turns = Math.round((ROLE_MAX_TURNS[role] ?? 30) * mult);
+  const args = ['-p', dispatch];
+  if (resume) {
+    // The turnaround killer: the warm session already holds the role prompt
+    // and everything it read — the payload is only the fix, and the system
+    // prompt is never re-sent.
+    args.push('--resume', resume, '--max-turns', String(Math.max(10, Math.round(turns / 3))));
+  } else {
+    args.push('--append-system-prompt', systemPrompt, '--max-turns', String(turns));
+  }
+  args.push(
     '--permission-mode',
     'acceptEdits',
     '--add-dir',
     repoDir,
     '--model',
     model,
-    '--max-turns',
-    String(turns),
     // stream-json is what makes cost visible: assistant frames carry the text
     // the UI shows, and the final result frame carries total_cost_usd/num_turns.
     '--output-format',
     'stream-json',
     '--verbose',
-  ];
+  );
+  return args;
 }
 
 /** One parsed stream-json line. Non-JSON input (mock agents) passes through raw. */
@@ -101,7 +125,8 @@ export function parseStreamLine(
   line: string,
 ):
   | { kind: 'text'; text: string }
-  | { kind: 'usage'; costUsd: number; turns: number }
+  | { kind: 'usage'; costUsd: number; turns: number; sessionId?: string }
+  | { kind: 'session'; sessionId: string }
   | { kind: 'raw'; line: string }
   | { kind: 'noise' } {
   if (!line.startsWith('{')) return { kind: 'raw', line };
@@ -121,11 +146,18 @@ export function parseStreamLine(
       return text ? { kind: 'text', text } : { kind: 'noise' };
     }
     if (frame.type === 'result') {
-      return {
+      const usage: { kind: 'usage'; costUsd: number; turns: number; sessionId?: string } = {
         kind: 'usage',
         costUsd: frame.total_cost_usd ?? 0,
         turns: frame.num_turns ?? 0,
       };
+      if (typeof (frame as { session_id?: string }).session_id === 'string') {
+        usage.sessionId = (frame as { session_id?: string }).session_id;
+      }
+      return usage;
+    }
+    if (frame.type === 'system' && typeof (frame as { session_id?: string }).session_id === 'string') {
+      return { kind: 'session', sessionId: (frame as { session_id: string }).session_id };
     }
     return { kind: 'noise' };
   } catch {
@@ -149,6 +181,8 @@ export class PowerRun extends EventEmitter {
   private activeChild: ReturnType<typeof spawn> | null = null;
   private readonly features: RunFeatures;
   private totalCostUsd = 0;
+  /** The claude session of the most recent dispatch — what a retry resumes. */
+  private lastAgentSession: string | null = null;
 
   constructor(private readonly opts: EngineOptions) {
     super();
@@ -232,18 +266,21 @@ export class PowerRun extends EventEmitter {
   }
 
   /** Dispatch one specialist, exactly as jobs/build.md specifies a dispatch. */
-  private async dispatch(role: Role, briefLines: string[]): Promise<void> {
+  private async dispatch(role: Role, briefLines: string[], resume?: string): Promise<void> {
     const promptPath = join(this.opts.powerRoot, 'agents', `${role}.md`);
-    const dispatch = [
-      `You are being dispatched as the ${role} on a Power run.`,
-      '',
-      `Repository (absolute path): ${this.opts.repoDir}`,
-      `Artifacts directory: ${join(this.opts.repoDir, '.power', 'artifacts')}`,
-      '',
-      ...briefLines,
-      '',
-      'Use absolute paths throughout. Write only the artifacts your role owns.',
-    ].join('\n');
+    // A resumed dispatch talks to the warm session: the brief IS the payload.
+    const dispatch = resume
+      ? briefLines.join('\n')
+      : [
+          `You are being dispatched as the ${role} on a Power run.`,
+          '',
+          `Repository (absolute path): ${this.opts.repoDir}`,
+          `Artifacts directory: ${join(this.opts.repoDir, '.power', 'artifacts')}`,
+          '',
+          ...briefLines,
+          '',
+          'Use absolute paths throughout. Write only the artifacts your role owns.',
+        ].join('\n');
 
     const command = this.opts.agentCommand
       ? this.opts.agentCommand(role, dispatch)
@@ -252,21 +289,27 @@ export class PowerRun extends EventEmitter {
           args: claudeArgs(
             role,
             dispatch,
-            readFileSync(promptPath, 'utf8'),
+            resume ? '' : readFileSync(promptPath, 'utf8'),
             this.opts.repoDir,
             this.features,
+            this.opts.goal,
+            resume,
           ),
         };
 
+    this.lastAgentSession = null;
     await this.exec(command.cmd, command.args, (line) => {
       const parsed = parseStreamLine(line);
-      if (parsed.kind === 'text') {
+      if (parsed.kind === 'session') {
+        this.lastAgentSession = parsed.sessionId;
+      } else if (parsed.kind === 'text') {
         for (const part of parsed.text.split('\n')) {
           if (part.trim()) this.emitEvent({ type: 'agent', role, line: part });
         }
       } else if (parsed.kind === 'raw') {
         this.emitEvent({ type: 'agent', role, line: parsed.line });
       } else if (parsed.kind === 'usage') {
+        if (parsed.sessionId) this.lastAgentSession = parsed.sessionId;
         this.totalCostUsd += parsed.costUsd;
         this.emitEvent({ type: 'agent_usage', role, costUsd: parsed.costUsd, turns: parsed.turns });
         this.emitEvent({ type: 'run_usage', costUsd: this.totalCostUsd });
@@ -286,21 +329,45 @@ export class PowerRun extends EventEmitter {
     brief: string[],
   ): Promise<boolean> {
     let lastGateOutput = '';
+    let resumableSession: string | null = null;
     for (let attempt = 0; ; attempt += 1) {
       if (this.stopped) return false;
-      const fullBrief =
-        attempt === 0
-          ? brief
-          : [
-              ...brief,
-              '',
-              'RETRY, not a redo. The artifact already exists — read it first. It FAILED',
-              'its gate on exactly these rules:',
-              lastGateOutput,
-              'Edit the existing artifact to fix ONLY these violations. Do not redo the',
-              'underlying work, do not refetch sources, do not restructure what passed.',
-            ];
-      await this.dispatch(role, fullBrief);
+      if (attempt === 0) {
+        await this.dispatch(role, brief);
+      } else if (resumableSession) {
+        this.emitEvent({ type: 'agent', role, line: '↻ retrying in the same session — violations only' });
+        const fix = [
+          'Your artifact FAILED its gate on exactly these rules:',
+          lastGateOutput,
+          'Edit the existing artifact to fix ONLY these violations. Do not redo the',
+          'underlying work, do not refetch sources, do not restructure what passed.',
+        ];
+        try {
+          await this.dispatch(role, fix, resumableSession);
+        } catch {
+          if (this.stopped) return false;
+          this.emitEvent({ type: 'agent', role, line: 'session resume failed — cold retry' });
+          await this.dispatch(role, [
+            ...brief,
+            '',
+            'RETRY, not a redo. The artifact already exists — read it first. It FAILED',
+            'its gate on exactly these rules:',
+            lastGateOutput,
+            'Edit the existing artifact to fix ONLY these violations.',
+          ]);
+        }
+      } else {
+        await this.dispatch(role, [
+          ...brief,
+          '',
+          'RETRY, not a redo. The artifact already exists — read it first. It FAILED',
+          'its gate on exactly these rules:',
+          lastGateOutput,
+          'Edit the existing artifact to fix ONLY these violations. Do not redo the',
+          'underlying work, do not refetch sources, do not restructure what passed.',
+        ]);
+      }
+      resumableSession = this.lastAgentSession ?? resumableSession;
       if (await this.gate(stage)) {
         await this.state(['gate', stage, 'pass']);
         return true;

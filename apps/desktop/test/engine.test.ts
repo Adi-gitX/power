@@ -212,3 +212,36 @@ describe('run options', () => {
     expect(parseStreamLine('{"type":"system","subtype":"init"}')).toEqual({ kind: 'noise' });
   });
 });
+
+describe('efficiency contract', () => {
+  const features = { ...({} as object), tier: 'auto', research: true, reviewTest: true, docs: true, autoApprove: false, packs: false } as import('../src/main/engine/types.js').RunFeatures;
+
+  it('auto tier runs a simple goal entirely on sonnet with tightened caps', () => {
+    const args = claudeArgs('implementer', 'd', 'sys', '/tmp/x', features, 'a small html welcome page');
+    expect(args[args.indexOf('--model') + 1]).toBe('sonnet');
+    expect(Number(args[args.indexOf('--max-turns') + 1])).toBe(42); // 60 × 0.7
+  });
+
+  it('auto tier keeps the per-role map for complex goals', () => {
+    const args = claudeArgs('implementer', 'd', 'sys', '/tmp/x', features, 'a dashboard with auth and a database');
+    expect(args[args.indexOf('--model') + 1]).toBe('opus');
+    expect(Number(args[args.indexOf('--max-turns') + 1])).toBe(60);
+  });
+
+  it('a resumed retry never re-sends the system prompt', () => {
+    const args = claudeArgs('architect', 'fix these violations', 'THE-40KB-PROMPT', '/tmp/x', features, 'simple page', 'sess-123');
+    expect(args).toContain('--resume');
+    expect(args).toContain('sess-123');
+    expect(args).not.toContain('--append-system-prompt');
+    expect(args.join(' ')).not.toContain('THE-40KB-PROMPT');
+    // And the fix budget is a fraction of a fresh stage's.
+    expect(Number(args[args.indexOf('--max-turns') + 1])).toBeLessThanOrEqual(10);
+  });
+
+  it('captures session ids from both frame shapes', () => {
+    expect(parseStreamLine('{"type":"system","subtype":"init","session_id":"abc"}'))
+      .toEqual({ kind: 'session', sessionId: 'abc' });
+    const usage = parseStreamLine('{"type":"result","total_cost_usd":0.1,"num_turns":3,"session_id":"abc"}');
+    expect(usage).toMatchObject({ kind: 'usage', sessionId: 'abc' });
+  });
+});

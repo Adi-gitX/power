@@ -41,8 +41,8 @@ export type RunEvent =
 /** Per-run controls, chosen in the ask box. Every flag is honest: a skipped
  * stage is recorded as skipped, never faked as passed. */
 export interface RunFeatures {
-  /** eco: all-sonnet, tighter caps · balanced: per-role · max: all-opus, looser caps */
-  tier: 'eco' | 'balanced' | 'max';
+  /** auto: sonnet for simple goals, per-role for complex · eco/balanced/max as named */
+  tier: 'auto' | 'eco' | 'balanced' | 'max';
   research: boolean;
   reviewTest: boolean;
   docs: boolean;
@@ -51,7 +51,7 @@ export interface RunFeatures {
 }
 
 export const DEFAULT_FEATURES: RunFeatures = {
-  tier: 'balanced',
+  tier: 'auto',
   research: true,
   reviewTest: true,
   docs: true,

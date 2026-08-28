@@ -35,6 +35,9 @@ final class RunEngine: ObservableObject {
     private var approvalContinuation: CheckedContinuation<(ok: Bool, reason: String?), Never>?
     private var activeProcess: Process?
     private var stopped = false
+    /// The claude session of the most recent dispatch — what a retry resumes
+    /// instead of re-sending a 20–40KB system prompt into a cold context.
+    private var lastAgentSession: String?
     private var repoDir = ""
     private var goal = ""
     private var features = RunFeatures()
@@ -65,6 +68,9 @@ final class RunEngine: ObservableObject {
         case .eco: "sonnet"
         case .max: "opus"
         case .balanced: Self.roleModel[role] ?? "sonnet"
+        case .auto:
+            // Simple goal → sonnet across the board; complex → per-role map.
+            ModelPolicy.isComplex(goal) ? (Self.roleModel[role] ?? "sonnet") : "sonnet"
         }
     }
 
@@ -74,6 +80,7 @@ final class RunEngine: ObservableObject {
         case .eco: 0.7
         case .balanced: 1
         case .max: 1.3
+        case .auto: ModelPolicy.isComplex(goal) ? 1 : 0.7
         }
         return Int((base * mult).rounded())
     }
@@ -338,20 +345,49 @@ final class RunEngine: ObservableObject {
         }
         let gateName = stage == .verify ? "verification" : stage.rawValue
 
+        var resumableSession: String?
         while true {
             if stopped { return false }
-            var fullBrief = brief
-            if attempt > 0 {
-                fullBrief += [
+            if attempt == 0 {
+                try await dispatch(role, stage: stage, brief: brief)
+            } else if let warm = resumableSession {
+                // The turnaround killer: talk to the session that already
+                // holds the role prompt and everything it read. The entire
+                // payload is the violations; the system prompt is never
+                // re-sent and the provider cache does the rest.
+                appendLine("↻ retrying in the same session — violations only", to: stage)
+                let fixBrief = [
+                    "Your artifact FAILED its gate on exactly these rules:",
+                    lastGateOutput,
+                    "Edit the existing artifact to fix ONLY these violations. Do not redo the",
+                    "underlying work, do not refetch sources, do not restructure what passed.",
+                ]
+                do {
+                    try await dispatch(role, stage: stage, brief: fixBrief, resume: warm)
+                } catch {
+                    // A dead session (expired, evicted) must not kill the run:
+                    // fall back to one cold dispatch with the full retry brief.
+                    if stopped { return false }
+                    appendLine("session resume failed — cold retry", to: stage)
+                    try await dispatch(role, stage: stage, brief: brief + [
+                        "",
+                        "RETRY, not a redo. The artifact already exists — read it first. It FAILED",
+                        "its gate on exactly these rules:",
+                        lastGateOutput,
+                        "Edit the existing artifact to fix ONLY these violations.",
+                    ])
+                }
+            } else {
+                try await dispatch(role, stage: stage, brief: brief + [
                     "",
                     "RETRY, not a redo. The artifact already exists — read it first. It FAILED",
                     "its gate on exactly these rules:",
                     lastGateOutput,
                     "Edit the existing artifact to fix ONLY these violations. Do not redo the",
                     "underlying work, do not refetch sources, do not restructure what passed.",
-                ]
+                ])
             }
-            try await dispatch(role, stage: stage, brief: fullBrief)
+            resumableSession = lastAgentSession ?? resumableSession
 
             let gate = try await runGate(named: gateName)
             gates[stage] = gate
@@ -380,19 +416,30 @@ final class RunEngine: ObservableObject {
 
     // MARK: Dispatch, exactly as jobs/build.md specifies one
 
-    private func dispatch(_ role: Role, stage: StageID, brief: [String]) async throws {
-        let promptURL = powerRoot.appendingPathComponent("agents/\(role.rawValue).md")
-        let systemPrompt = try String(contentsOf: promptURL, encoding: .utf8)
-        let dispatchText = ([
-            "You are being dispatched as the \(role.rawValue) on a Power run.",
-            "",
-            "Repository (absolute path): \(repoDir)",
-            "Artifacts directory: \(repoDir)/.power/artifacts",
-            "",
-        ] + brief + [
-            "",
-            "Use absolute paths throughout. Write only the artifacts your role owns.",
-        ]).joined(separator: "\n")
+    private func dispatch(
+        _ role: Role,
+        stage: StageID,
+        brief: [String],
+        resume: String? = nil
+    ) async throws {
+        // A resumed dispatch talks to the session that already holds the role
+        // prompt, the repo context, and everything it read — so the brief is
+        // ONLY the fix. A cold dispatch carries the full identity.
+        let dispatchText: String
+        if resume != nil {
+            dispatchText = brief.joined(separator: "\n")
+        } else {
+            dispatchText = ([
+                "You are being dispatched as the \(role.rawValue) on a Power run.",
+                "",
+                "Repository (absolute path): \(repoDir)",
+                "Artifacts directory: \(repoDir)/.power/artifacts",
+                "",
+            ] + brief + [
+                "",
+                "Use absolute paths throughout. Write only the artifacts your role owns.",
+            ]).joined(separator: "\n")
+        }
 
         // Test parity with the Electron engine: POWER_MOCK_AGENTS swaps the
         // model for fixture-writing mocks, so the full pipeline — real state
@@ -406,19 +453,31 @@ final class RunEngine: ObservableObject {
             return
         }
 
-        let args = [
-            "-p", dispatchText,
-            "--append-system-prompt", systemPrompt,
+        var args = ["-p", dispatchText]
+        if let resume {
+            // No system prompt resend: the session already has it, and the
+            // provider's cache already holds the context. A fix needs few
+            // turns; cap it tighter than a fresh stage.
+            args += ["--resume", resume, "--max-turns", String(max(10, maxTurns(for: role) / 3))]
+        } else {
+            let promptURL = powerRoot.appendingPathComponent("agents/\(role.rawValue).md")
+            let systemPrompt = try String(contentsOf: promptURL, encoding: .utf8)
+            args += [
+                "--append-system-prompt", systemPrompt,
+                "--max-turns", String(maxTurns(for: role)),
+            ]
+        }
+        args += [
             "--permission-mode", "acceptEdits",
             "--add-dir", repoDir,
             "--model", model(for: role),
-            "--max-turns", String(maxTurns(for: role)),
             // stream-json is what makes cost visible: assistant frames carry
             // the card's text, the result frame carries cost and turns.
             "--output-format", "stream-json",
             "--verbose",
         ]
 
+        lastAgentSession = nil
         _ = try await exec("claude", args) { [weak self] line in
             self?.consumeStreamLine(line, role: role, stage: stage)
         }
@@ -433,6 +492,8 @@ final class RunEngine: ObservableObject {
             return
         }
         switch frame["type"] as? String {
+        case "system":
+            if let sid = frame["session_id"] as? String { lastAgentSession = sid }
         case "assistant":
             if let message = frame["message"] as? [String: Any],
                let content = message["content"] as? [[String: Any]] {
@@ -446,8 +507,14 @@ final class RunEngine: ObservableObject {
         case "result":
             let cost = frame["total_cost_usd"] as? Double ?? 0
             let turns = frame["num_turns"] as? Int ?? 0
-            usage[role] = StageUsage(costUsd: cost, turns: turns)
+            let prior = usage[role]
+            usage[role] = StageUsage(
+                costUsd: (prior?.costUsd ?? 0) + cost,
+                turns: (prior?.turns ?? 0) + turns,
+                model: model(for: role)
+            )
             totalCostUsd += cost
+            if let sid = frame["session_id"] as? String { lastAgentSession = sid }
         default:
             break // tool-use noise never reaches the card
         }
