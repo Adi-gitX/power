@@ -29,6 +29,9 @@ struct ContentView: View {
     /// Build = the full gated pipeline continuing in this repo and transcript.
     @State private var buildMode = false
     @State private var continuingSession: HistoryRow?
+    /// The goal of the run on screen — survives the input bar being cleared.
+    @State private var activeGoal = ""
+
     /// Right-pane workspace tab: the rendered page, or the file browser.
     @State private var previewTab: PreviewTab = .render
     @State private var webReloadToken = 0
@@ -81,36 +84,30 @@ struct ContentView: View {
             if devServer.port != nil { webReloadToken += 1 }
         }
         .onChange(of: engine.running) {
-            // A continuation returns home to its chat, transcript refreshed —
-            // the pipeline was a passage in the conversation, not a new place.
-            if !engine.running, let session = continuingSession {
-                chatMessages = TranscriptStore.read(session.id).map {
-                    ChatMessage(role: $0.role == "user" ? .user : .assistant, text: $0.text)
-                }
-                selectedSession = HistoryStore.read().first { $0.id == session.id } ?? session
-                continuingSession = nil
-                // The build changed the code: re-render the preview and make
-                // sure the workspace is showing it.
-                webReloadToken += 1
-                refreshPreviewFiles()
-                withAnimation(.spring(response: 0.35)) {
-                    currentView = .chat
-                    showPreview = true
-                    previewTab = .render
-                }
-            }
-        }
-        .onChange(of: repoDir) {
-            // One server, one workspace: switching sessions stops a server
-            // that belongs to the previous repo.
-            devServer.syncTo(repoDir: repoDir)
-        }
-        .onChange(of: devServer.port) {
-            if devServer.port != nil { webReloadToken += 1 }
-        }
-        .onChange(of: engine.running) {
+            guard !engine.running else { return }
             history = HistoryStore.read()
-            if showPreview { refreshPreviewFiles() }
+
+            // Any finished run lands in its session workspace — chat on the
+            // left, fresh preview on the right. A continuation returns to the
+            // conversation it belongs to; a successful fresh run opens its
+            // newly created session rather than dead-ending on a banner.
+            let session = continuingSession
+                ?? (engine.done != nil ? history.first : nil)
+            guard let session else { return }
+
+            chatMessages = TranscriptStore.read(session.id).map {
+                ChatMessage(role: $0.role == "user" ? .user : .assistant, text: $0.text)
+            }
+            selectedSession = history.first { $0.id == session.id } ?? session
+            continuingSession = nil
+            repoDir = session.repoDir
+            webReloadToken += 1
+            refreshPreviewFiles()
+            withAnimation(.spring(response: 0.35)) {
+                currentView = .chat
+                showPreview = true
+                previewTab = .render
+            }
         }
         .onChange(of: engine.stageOrder.count) {
             if showPreview { refreshPreviewFiles() }
@@ -134,15 +131,13 @@ struct ContentView: View {
 
             // New Session
             HoverButton {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    currentView = .home
-                    goal = ""
-                }
+                newSession()
             } label: {
                 Label("New Session", systemImage: "plus")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.ink)
             }
+            .focusEffectDisabled()
             .padding(.horizontal, 10)
 
             // Search
@@ -181,12 +176,25 @@ struct ContentView: View {
                                     // conversation from the durable transcript.
                                     goal = ""
                                     selectedSession = row
-                                    chatMessages = TranscriptStore.read(row.id).map {
+                                    var restored = TranscriptStore.read(row.id).map {
                                         ChatMessage(
                                             role: $0.role == "user" ? .user : .assistant,
                                             text: $0.text
                                         )
                                     }
+                                    if restored.isEmpty {
+                                        // A run from before transcripts existed:
+                                        // show what we do know, never a void.
+                                        restored = [
+                                            ChatMessage(role: .user, text: row.goal),
+                                            ChatMessage(role: .assistant, text:
+                                                "This run finished before transcripts were recorded. "
+                                                + "Outcome: \(row.outcome ?? "done")"
+                                                + (row.costUsd.map { String(format: " · $%.2f", $0) } ?? "")
+                                                + ". Artifacts are in the chips above; continue below."),
+                                        ]
+                                    }
+                                    chatMessages = restored
                                     currentView = .chat
                                     showPreview = true
                                     refreshPreviewFiles()
@@ -194,6 +202,7 @@ struct ContentView: View {
                                     // Incomplete — pre-fill and go home
                                     goal = row.goal
                                     currentView = .home
+                                    showPreview = false
                                 }
                             }
                         } label: {
@@ -304,7 +313,7 @@ struct ContentView: View {
                             removal: .opacity
                         ))
                 } else {
-                    RunTimeline(engine: engine, goal: goal, rejectReason: $rejectReason)
+                    RunTimeline(engine: engine, goal: activeGoal, rejectReason: $rejectReason)
                         .transition(.asymmetric(
                             insertion: .opacity.combined(with: .offset(y: 10)),
                             removal: .opacity
@@ -344,8 +353,9 @@ struct ContentView: View {
                     )
                     .onAppear { headerPulsing = true }
 
-                Text(goal).font(.system(size: 13, weight: .medium))
+                Text(activeGoal).font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Color.ink).lineLimit(1)
+                    .layoutPriority(1)
 
                 if !features.offSummary.isEmpty {
                     Chip(text: features.offSummary)
@@ -376,10 +386,7 @@ struct ContentView: View {
                 Spacer()
 
                 Button {
-                    withAnimation(.spring(response: 0.35)) {
-                        currentView = .home
-                        goal = ""
-                    }
+                    newSession()
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "plus")
@@ -434,10 +441,10 @@ struct ContentView: View {
 
     // MARK: Home view
 
-    private let starterPrompts = [
-        "a personal expense tracker with charts and categories",
-        "a landing page for a coffee subscription service",
-        "a CLI that renames photos by their EXIF date",
+    private let starterPrompts: [(label: String, prompt: String)] = [
+        ("Expense tracker", "a personal expense tracker with charts and categories"),
+        ("Coffee landing page", "a landing page for a coffee subscription service"),
+        ("EXIF photo renamer", "a CLI that renames photos by their EXIF date"),
     ]
 
     private var homeView: some View {
@@ -485,12 +492,12 @@ struct ContentView: View {
                     // Three doors past the blank-page wall. No repo needed:
                     // starting creates the project.
                     HStack(spacing: 8) {
-                        ForEach(starterPrompts, id: \.self) { prompt in
+                        ForEach(starterPrompts, id: \.label) { starter in
                             Button {
-                                goal = prompt
+                                goal = starter.prompt
                                 inputFocused = true
                             } label: {
-                                Text(TitleMaker.quick(prompt))
+                                Text(starter.label)
                                     .font(.system(size: 12))
                                     .foregroundStyle(Color.bodyText)
                                     .lineLimit(1)
@@ -499,7 +506,7 @@ struct ContentView: View {
                                     .overlay(Capsule().stroke(Color.hairline))
                             }
                             .buttonStyle(ScaleButtonStyle())
-                            .help(prompt)
+                            .help(starter.prompt)
                         }
                     }
 
@@ -524,6 +531,7 @@ struct ContentView: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Color.ink)
                 .lineLimit(1)
+                .layoutPriority(1)
 
             if let outcome = selectedSession?.outcome {
                 Text(outcome)
@@ -543,21 +551,6 @@ struct ContentView: View {
 
             Spacer()
 
-            // Chat = one follow-up turn · Build = the full gated pipeline.
-            HStack(spacing: 0) {
-                ForEach([false, true], id: \.self) { mode in
-                    Button(mode ? "Build" : "Chat") { buildMode = mode }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(buildMode == mode ? Color.ink : Color.mutedText)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(buildMode == mode ? Color.raised : .clear)
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.hairline))
-            .help("Chat answers a question in one turn. Build runs the full gated pipeline on your next instruction.")
-
             Button {
                 if let dir = repoDir { EditorLauncher.openVSCode(dir) }
             } label: {
@@ -575,30 +568,7 @@ struct ContentView: View {
             .help("Open this session's repository in VS Code")
 
             Button {
-                if let dir = repoDir { PreviewLauncher.openInChrome(dir) }
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "safari")
-                        .font(.system(size: 11))
-                    Text("Preview")
-                        .font(.system(size: 12))
-                }
-                .foregroundStyle(Color.mutedText)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.raised.opacity(0.5)))
-            }
-            .buttonStyle(ScaleButtonStyle())
-            .help(repoDir.map { "Opens \(PreviewLauncher.resolve($0).lastPathComponent) in Chrome" } ?? "Opens the preview in Chrome")
-
-            editorMenu
-
-            Button {
-                withAnimation(.spring(response: 0.35)) {
-                    currentView = .home
-                    goal = ""
-                    chatMessages = []
-                    selectedSession = nil
-                }
+                newSession()
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "plus")
@@ -617,6 +587,19 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .frame(height: 48)
         .overlay(Rectangle().fill(Color.hairline).frame(height: 1), alignment: .bottom)
+    }
+
+    /// Everything "start fresh" must reset, in one place — half-reset states
+    /// were leaving the preview panel open over the home screen, crushing it.
+    private func newSession() {
+        withAnimation(.spring(response: 0.35)) {
+            currentView = .home
+            goal = ""
+            chatMessages = []
+            selectedSession = nil
+            showPreview = false
+            buildMode = false
+        }
     }
 
     // MARK: Chat view
@@ -833,7 +816,9 @@ struct ContentView: View {
         }
         guard let dir = repoDir,
               goal.trimmingCharacters(in: .whitespaces).count >= 8 else { return }
-        engine.start(goal: goal.trimmingCharacters(in: .whitespaces), repoDir: dir, features: features)
+        activeGoal = goal.trimmingCharacters(in: .whitespaces)
+        engine.start(goal: activeGoal, repoDir: dir, features: features)
+        goal = ""
         withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
             currentView = .run
         }
@@ -916,20 +901,32 @@ struct ContentView: View {
                         // Send / Stop / Chat
                         Group {
                             if currentView == .chat {
-                                Button { sendChat() } label: {
-                                    Image(systemName: "arrow.up")
-                                        .font(.system(size: 14, weight: .bold))
+                                // The mode toggle sits beside the button it
+                                // governs. One submit path — button and Enter
+                                // cannot disagree.
+                                HStack(spacing: 0) {
+                                    ForEach([false, true], id: \.self) { mode in
+                                        Button(mode ? "Build" : "Chat") { buildMode = mode }
+                                            .buttonStyle(.plain)
+                                            .font(.system(size: 11.5, weight: .medium))
+                                            .foregroundStyle(buildMode == mode ? Color.ink : Color.mutedText)
+                                            .padding(.horizontal, 10).padding(.vertical, 5)
+                                            .background(buildMode == mode ? Color.raised : .clear)
+                                    }
+                                }
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.hairline))
+                                .help("Chat answers in one turn. Build runs the full gated pipeline on your instruction.")
+
+                                Button { handleSubmit() } label: {
+                                    Image(systemName: buildMode ? "hammer.fill" : "arrow.up")
+                                        .font(.system(size: buildMode ? 12 : 14, weight: .bold))
                                         .foregroundStyle(.white)
                                         .frame(width: 34, height: 34)
-                                        .background(
-                                            Circle().fill(
-                                                !goal.trimmingCharacters(in: .whitespaces).isEmpty && !isChatting
-                                                    ? Color.accent : Color.raised
-                                            )
-                                        )
+                                        .background(Circle().fill(chatSendReady ? Color.accent : Color.raised))
                                 }
                                 .buttonStyle(ScaleButtonStyle())
-                                .disabled(goal.trimmingCharacters(in: .whitespaces).isEmpty || isChatting)
+                                .disabled(!chatSendReady)
                             } else if engine.running {
                                 Button { engine.stop() } label: {
                                     Image(systemName: "stop.fill")
@@ -993,7 +990,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
             HStack {
-                Text("Preview")
+                Text("Workspace")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.ink)
 
@@ -1178,7 +1175,7 @@ struct ContentView: View {
             }
         }
         // A rendered page needs real estate; the file browser does not.
-        .frame(width: previewTab == .render ? 560 : 350)
+        .frame(width: previewTab == .render ? 520 : 350)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: previewTab)
         .background(Color.panel.opacity(0.6))
     }
@@ -1200,6 +1197,14 @@ struct ContentView: View {
         guard let dir = repoDir else { return }
         selectedPreviewFile = name
         previewContent = (try? String(contentsOfFile: "\(dir)/.power/artifacts/\(name)", encoding: .utf8)) ?? "(unable to read file)"
+    }
+
+    /// Build needs a real instruction (the engine refuses short goals); Chat
+    /// needs anything non-empty and no turn in flight.
+    private var chatSendReady: Bool {
+        let length = goal.trimmingCharacters(in: .whitespaces).count
+        if engine.running { return false }
+        return buildMode ? length >= 8 : (length > 0 && !isChatting)
     }
 
     // MARK: Submit dispatch

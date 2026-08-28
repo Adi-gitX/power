@@ -14,9 +14,11 @@ struct PowerApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .frame(minWidth: 960, minHeight: 640)
+                // 250 sidebar + 520 preview + dividers leaves the chat column
+                // ≥ 420pt at minimum — it can no longer be crushed to a sliver.
+                .frame(minWidth: 1200, minHeight: 720)
         }
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1240, height: 820)
+        .defaultSize(width: 1360, height: 860)
     }
 }
