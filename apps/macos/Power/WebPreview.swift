@@ -10,6 +10,7 @@ import WebKit
 struct WebPreview: NSViewRepresentable {
     let repoDir: String
     let reloadToken: Int
+    var devPort: Int? = nil
 
     func makeNSView(context: Context) -> WKWebView {
         // No KVC into private preference keys — they crash across OS updates.
@@ -24,15 +25,17 @@ struct WebPreview: NSViewRepresentable {
         // Reload only on an explicit token bump or a repo switch — never on
         // unrelated SwiftUI passes, which would flicker the page.
         if context.coordinator.lastToken != reloadToken
-            || context.coordinator.lastRepo != repoDir {
+            || context.coordinator.lastRepo != repoDir
+            || context.coordinator.lastPort != devPort {
             load(into: view)
             context.coordinator.lastToken = reloadToken
             context.coordinator.lastRepo = repoDir
+            context.coordinator.lastPort = devPort
         }
     }
 
     private func load(into view: WKWebView) {
-        let target = PreviewLauncher.resolve(repoDir)
+        let target = PreviewLauncher.resolve(repoDir, devPort: devPort)
         if target.isFileURL {
             view.loadFileURL(target, allowingReadAccessTo: URL(fileURLWithPath: repoDir))
         } else {
@@ -45,5 +48,6 @@ struct WebPreview: NSViewRepresentable {
     final class Coordinator {
         var lastToken = -1
         var lastRepo = ""
+        var lastPort: Int?
     }
 }

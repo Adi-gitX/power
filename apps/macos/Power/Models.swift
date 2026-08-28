@@ -414,6 +414,73 @@ enum TranscriptStore {
     }
 }
 
+// MARK: - Projects
+
+/// "Build me an app" should not begin with a folder picker. When no repo is
+/// chosen, the app creates the project itself: a named folder under
+/// ~/PowerProjects (slugged from the goal, numbered on collision) with git
+/// initialised — which is also what makes auto-checkpoints possible from the
+/// very first run.
+enum ProjectFactory {
+    static var projectsRoot: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("PowerProjects", isDirectory: true)
+    }
+
+    static func create(from goal: String) -> String? {
+        let fm = FileManager.default
+        let slug = TitleMaker.quick(goal)
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let base = slug.isEmpty ? "project" : String(slug.prefix(40))
+
+        var dir = projectsRoot.appendingPathComponent(base)
+        var counter = 2
+        while fm.fileExists(atPath: dir.path) {
+            dir = projectsRoot.appendingPathComponent("\(base)-\(counter)")
+            counter += 1
+        }
+        do {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch { return nil }
+
+        // git init — best effort; a project without git still works, it just
+        // loses checkpoints.
+        let git = Process()
+        git.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        git.arguments = ["git", "init", "-q"]
+        git.currentDirectoryURL = dir
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = PowerPaths.spawnPATH
+        git.environment = env
+        try? git.run()
+        git.waitUntilExit()
+
+        return dir.path
+    }
+}
+
+/// Preflight: the two binaries every run needs, checked before a token is
+/// spent, with errors a person can act on.
+enum Toolchain {
+    static func missing() -> String? {
+        if !found("node") {
+            return "node was not found. Install it (brew install node) and relaunch Power."
+        }
+        if !found("claude") {
+            return "The claude CLI was not found. Install Claude Code (npm i -g @anthropic-ai/claude-code), sign in, and relaunch Power."
+        }
+        return nil
+    }
+
+    static func found(_ binary: String) -> Bool {
+        PowerPaths.spawnPATH.split(separator: ":").contains {
+            FileManager.default.isExecutableFile(atPath: "\($0)/\(binary)")
+        }
+    }
+}
+
 // MARK: - Launchers
 
 /// Open the session's repo in VS Code, falling back through the known editors.
@@ -449,8 +516,12 @@ enum PreviewLauncher {
         "build/index.html", "public/index.html",
     ]
 
-    /// What the button will open, for tooltips and tests.
-    static func resolve(_ repoDir: String) -> URL {
+    /// What the button will open, for tooltips and tests. A live dev server's
+    /// port beats every static fallback — running code is the truth.
+    static func resolve(_ repoDir: String, devPort: Int? = nil) -> URL {
+        if let devPort {
+            return URL(string: "http://localhost:\(devPort)")!
+        }
         for candidate in entryCandidates {
             let path = "\(repoDir)/\(candidate)"
             if FileManager.default.fileExists(atPath: path) {

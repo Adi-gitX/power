@@ -6,6 +6,7 @@ import AppKit
 struct ContentView: View {
     @AppStorage("power.onboarded") private var hasOnboarded = false
     @StateObject private var engine = RunEngine()
+    @StateObject private var devServer = DevServerManager()
     @State private var auth: ClaudeAuth.Status?
     @State private var signingIn = false
     @State private var currentView: MainView = .home
@@ -71,6 +72,14 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .powerHistoryChanged)) { _ in
             history = HistoryStore.read()
         }
+        .onChange(of: repoDir) {
+            // One server, one workspace: switching sessions stops a server
+            // that belongs to the previous repo.
+            devServer.syncTo(repoDir: repoDir)
+        }
+        .onChange(of: devServer.port) {
+            if devServer.port != nil { webReloadToken += 1 }
+        }
         .onChange(of: engine.running) {
             // A continuation returns home to its chat, transcript refreshed —
             // the pipeline was a passage in the conversation, not a new place.
@@ -90,6 +99,14 @@ struct ContentView: View {
                     previewTab = .render
                 }
             }
+        }
+        .onChange(of: repoDir) {
+            // One server, one workspace: switching sessions stops a server
+            // that belongs to the previous repo.
+            devServer.syncTo(repoDir: repoDir)
+        }
+        .onChange(of: devServer.port) {
+            if devServer.port != nil { webReloadToken += 1 }
         }
         .onChange(of: engine.running) {
             history = HistoryStore.read()
@@ -417,6 +434,12 @@ struct ContentView: View {
 
     // MARK: Home view
 
+    private let starterPrompts = [
+        "a personal expense tracker with charts and categories",
+        "a landing page for a coffee subscription service",
+        "a CLI that renames photos by their EXIF date",
+    ]
+
     private var homeView: some View {
         ZStack {
             // Subtle ambient glow
@@ -457,6 +480,27 @@ struct ContentView: View {
                         Text("What should we build?")
                             .font(.system(size: 28, weight: .bold))
                             .foregroundStyle(Color.ink)
+                    }
+
+                    // Three doors past the blank-page wall. No repo needed:
+                    // starting creates the project.
+                    HStack(spacing: 8) {
+                        ForEach(starterPrompts, id: \.self) { prompt in
+                            Button {
+                                goal = prompt
+                                inputFocused = true
+                            } label: {
+                                Text(TitleMaker.quick(prompt))
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Color.bodyText)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 12).padding(.vertical, 7)
+                                    .background(Capsule().fill(Color.panel))
+                                    .overlay(Capsule().stroke(Color.hairline))
+                            }
+                            .buttonStyle(ScaleButtonStyle())
+                            .help(prompt)
+                        }
                     }
 
                 }
@@ -781,7 +825,12 @@ struct ContentView: View {
     }
 
     private func startRun() {
-        if repoDir == nil { pickRepo() }
+        // No repo chosen? The app makes the project: a named folder under
+        // ~/PowerProjects with git initialised — checkpoints from run one.
+        // "Choose repository" remains for working in an existing codebase.
+        if repoDir == nil {
+            repoDir = ProjectFactory.create(from: goal)
+        }
         guard let dir = repoDir,
               goal.trimmingCharacters(in: .whitespaces).count >= 8 else { return }
         engine.start(goal: goal.trimmingCharacters(in: .whitespaces), repoDir: dir, features: features)
@@ -1000,9 +1049,31 @@ struct ContentView: View {
                 }
                 Spacer()
                 if previewTab == .render, let dir = repoDir {
-                    Text(PreviewLauncher.resolve(dir).isFileURL
+                    if DevServerManager.detectScript(dir) != nil {
+                        Button {
+                            if devServer.isRunning { devServer.stop() } else { devServer.start(dir) }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: devServer.isRunning ? "stop.fill" : "play.fill")
+                                    .font(.system(size: 9))
+                                Text(devServer.isRunning
+                                    ? (devServer.port.map { "dev :\($0)" } ?? "starting…")
+                                    : "Run dev")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            .foregroundStyle(devServer.isRunning ? Color.pass : Color.mutedText)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Capsule().fill(
+                                devServer.isRunning ? Color.pass.opacity(0.1) : Color.raised.opacity(0.5)))
+                        }
+                        .buttonStyle(ScaleButtonStyle())
+                        .help(devServer.isRunning
+                            ? "Stop the dev server"
+                            : "Start \(DevServerManager.packageManager(dir)) run \(DevServerManager.detectScript(dir) ?? "dev")")
+                    }
+                    Text(PreviewLauncher.resolve(dir, devPort: devServer.port).isFileURL
                         ? PreviewLauncher.resolve(dir).lastPathComponent
-                        : "localhost:3000")
+                        : "localhost:\(devServer.port ?? 3000)")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(Color.mutedText)
                     Button {
@@ -1032,7 +1103,7 @@ struct ContentView: View {
 
             if previewTab == .render {
                 if let dir = repoDir {
-                    WebPreview(repoDir: dir, reloadToken: webReloadToken)
+                    WebPreview(repoDir: dir, reloadToken: webReloadToken, devPort: devServer.port)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     VStack {

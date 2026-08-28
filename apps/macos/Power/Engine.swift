@@ -105,6 +105,12 @@ final class RunEngine: ObservableObject {
         continuingSession: String? = nil
     ) {
         guard !running else { return }
+        // Preflight before a token is spent: a missing binary should be one
+        // clear sentence, not a failed dispatch three stages in.
+        if let problem = Toolchain.missing() {
+            errorText = problem
+            return
+        }
         guard let root = PowerPaths.resolveRoot() else {
             errorText = "Power root not found. Set POWER_ROOT or ~/.power-desktop.json, or keep the repo at ~/Library/power."
             return
@@ -292,12 +298,31 @@ final class RunEngine: ObservableObject {
             done = final
             HistoryStore.stamp(id: sessionId, outcome: "done", costUsd: totalCostUsd)
             transcript("assistant", "Run complete — all gates passed.\n\(final.trimmingCharacters(in: .whitespacesAndNewlines))")
+            await checkpoint()
             NotificationCenter.default.post(name: .powerHistoryChanged, object: nil)
         } catch is CancellationError {
             // stopped
         } catch {
             if stopped { return }
             errorText = error.localizedDescription
+        }
+    }
+
+    /// Every finished run becomes a git commit, so iterating is safe by
+    /// default: a Build continuation that goes wrong is one `git revert` away,
+    /// in the app's repo or in VS Code. Best-effort by design — a repo without
+    /// git skips silently, and a checkpoint can never fail the run it records.
+    private func checkpoint() async {
+        guard FileManager.default.fileExists(atPath: "\(repoDir)/.git") else { return }
+        let message = "Power checkpoint: \(String(goal.prefix(60)))"
+        _ = try? await exec("git", ["add", "-A"])
+        // Identity flags keep this working on machines with no git config.
+        let out = try? await exec("git", [
+            "-c", "user.name=Power", "-c", "user.email=checkpoint@power.local",
+            "commit", "-q", "-m", message,
+        ])
+        if out != nil {
+            transcript("assistant", "Checkpoint committed: \(message)")
         }
     }
 
