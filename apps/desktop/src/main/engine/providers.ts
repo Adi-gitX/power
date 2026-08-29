@@ -83,6 +83,46 @@ export const CLAUDE_DEFAULT: Provider = {
  * point at any other Anthropic-compatible endpoint instead. */
 export const OMNIROUTE_DEFAULT_BASE = 'http://127.0.0.1:20128';
 
+/** The reserved id of the managed OmniRoute provider Power provisions itself. */
+export const OMNIROUTE_PROVIDER_ID = 'omniroute';
+
+/**
+ * OmniRoute's smart model aliases, mapped per role. Code-writing and gate-graded
+ * roles ask for `auto/coding` (its coding-tuned combo); research and docs take
+ * the cheaper general routes. Passed through as `--model`, which Claude Code
+ * puts in the request for OmniRoute to resolve.
+ */
+const OMNIROUTE_MODELS: Record<Role, string> = {
+  researcher: 'auto',
+  documenter: 'auto/cheap',
+  architect: 'auto/coding',
+  implementer: 'auto/coding',
+  reviewer: 'auto/coding',
+  tester: 'auto/coding',
+  verifier: 'auto/coding',
+};
+
+/**
+ * The managed OmniRoute provider, built to Power's conventions. `maxFree` widens
+ * the quality floor to every role — the "route everything free" choice, quality
+ * trade-offs and all — while the default keeps the safe floor (research + docs).
+ * costWeight 0: free wins the routing tie for the roles it is trusted with.
+ */
+export function omniRouteProvider(maxFree = false, authToken?: string): Provider {
+  return {
+    id: OMNIROUTE_PROVIDER_ID,
+    label: 'OmniRoute',
+    kind: 'gateway',
+    baseUrl: OMNIROUTE_DEFAULT_BASE,
+    authToken,
+    allowRoles: maxFree
+      ? ['researcher', 'architect', 'implementer', 'reviewer', 'tester', 'verifier', 'documenter']
+      : [...SAFE_CHEAP_ROLES],
+    costWeight: 0,
+    models: OMNIROUTE_MODELS,
+  };
+}
+
 /** The roles it is safe to route to a cheap/unproven provider by default: a
  * miss here is caught by a later gate or is low-stakes prose, and re-running
  * one is cheap. Everything a gate directly grades, or that writes code, stays

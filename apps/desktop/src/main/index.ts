@@ -77,6 +77,7 @@ const POWER_ROOT = resolvePowerRoot();
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let activeRun: PowerRun | null = null;
+let omniServer: import('./engine/omniroute.js').OmniRouteServer | null = null;
 
 /**
  * Raycast-style lifecycle: closing the window never quits. The app lives in the
@@ -221,6 +222,32 @@ app.whenReady().then(() => {
     return detectGateway(baseUrl);
   });
 
+  // Managed OmniRoute lifecycle — install / start / stop / status, all local.
+  ipcMain.handle('power:omniroute-status', async () => {
+    const { isInstalled, ping } = await import('./engine/omniroute.js');
+    if (await ping()) return 'running';
+    return (await isInstalled()) ? 'stopped' : 'not-installed';
+  });
+  ipcMain.handle('power:omniroute-install', async (event) => {
+    const { install } = await import('./engine/omniroute.js');
+    await install((line) => event.sender.send('power:omniroute-log', line));
+    return true;
+  });
+  ipcMain.handle('power:omniroute-start', async () => {
+    const { OmniRouteServer } = await import('./engine/omniroute.js');
+    omniServer ??= new OmniRouteServer();
+    return omniServer.ensureRunning();
+  });
+  ipcMain.handle('power:omniroute-stop', async () => {
+    omniServer?.stop();
+    return true;
+  });
+  ipcMain.handle('power:omniroute-dashboard', async () => {
+    const { shell } = await import('electron');
+    await shell.openExternal('http://localhost:20128');
+    return true;
+  });
+
   ipcMain.handle('power:pick-repo', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
@@ -231,17 +258,34 @@ app.whenReady().then(() => {
 
   ipcMain.handle(
     'power:start-run',
-    (_event, repoDir: string, goal: string, features?: RunFeatures) => {
+    async (_event, repoDir: string, goal: string, features?: RunFeatures) => {
     if (activeRun) return { ok: false, error: 'a run is already active' };
     if (!existsSync(join(POWER_ROOT, 'scripts', 'run-state.mjs'))) {
       return { ok: false, error: `Power root not found at ${POWER_ROOT}` };
+    }
+
+    const providers = readProviders() as { id?: string; allowRoles?: unknown[] }[];
+    // If a run will route to the managed OmniRoute, make sure it is up before
+    // the first dispatch hits a dead endpoint.
+    const usesOmni = providers.some(
+      (p) => p.id === 'omniroute' && Array.isArray(p.allowRoles) && p.allowRoles.length > 0,
+    );
+    if (usesOmni && !process.env.POWER_MOCK_AGENTS) {
+      const { OmniRouteServer, isInstalled } = await import('./engine/omniroute.js');
+      if (!(await isInstalled())) {
+        return { ok: false, error: 'OmniRoute routing is on but the CLI is not installed — install it from Routing.' };
+      }
+      omniServer ??= new OmniRouteServer();
+      if (!(await omniServer.ensureRunning())) {
+        return { ok: false, error: 'OmniRoute did not start in time — open Routing and start it manually.' };
+      }
     }
 
     activeRun = new PowerRun({
       repoDir,
       goal,
       features: features ?? DEFAULT_FEATURES,
-      providers: readProviders() as never,
+      providers: providers as never,
       powerRoot: POWER_ROOT,
       // The test harness swaps the model for fixture-writing mocks; production
       // dispatches through the user's own `claude` CLI login.

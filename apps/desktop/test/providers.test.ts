@@ -2,10 +2,12 @@ import { describe, it, expect } from 'vitest';
 import {
   CLAUDE_DEFAULT,
   SAFE_CHEAP_ROLES,
+  OMNIROUTE_PROVIDER_ID,
   chooseProvider,
   providerEnv,
   normalizeBaseUrl,
   compactBrief,
+  omniRouteProvider,
   type Provider,
 } from '../src/main/engine/providers.js';
 
@@ -77,6 +79,37 @@ describe('gateway env hook', () => {
     const env = providerEnv({ ...gateway, authToken: undefined });
     expect(env).toEqual({ ANTHROPIC_BASE_URL: 'http://127.0.0.1:20128' });
     expect(env).not.toHaveProperty('ANTHROPIC_AUTH_TOKEN');
+  });
+});
+
+describe('managed OmniRoute provider', () => {
+  it('defaults to the safe floor — cheap roles only', () => {
+    const p = omniRouteProvider();
+    expect(p.id).toBe(OMNIROUTE_PROVIDER_ID);
+    expect(p.allowRoles.sort()).toEqual([...SAFE_CHEAP_ROLES].sort());
+    expect(chooseProvider('implementer', [p]).id).toBe('claude'); // floor holds
+    expect(chooseProvider('researcher', [p]).id).toBe(OMNIROUTE_PROVIDER_ID);
+  });
+
+  it('maxFree widens the floor to every role — the opt-in the user chooses', () => {
+    const p = omniRouteProvider(true);
+    for (const role of CLAUDE_DEFAULT.allowRoles) {
+      expect(p.allowRoles).toContain(role);
+      expect(chooseProvider(role, [p]).id).toBe(OMNIROUTE_PROVIDER_ID); // weight 0 wins
+    }
+  });
+
+  it('maps code roles to auto/coding and points at the local gateway', () => {
+    const p = omniRouteProvider();
+    expect(p.models?.implementer).toBe('auto/coding');
+    expect(p.models?.reviewer).toBe('auto/coding');
+    expect(p.models?.documenter).toBe('auto/cheap');
+    expect(providerEnv(p).ANTHROPIC_BASE_URL).toBe('http://127.0.0.1:20128');
+  });
+
+  it('carries an auth token through when one is supplied', () => {
+    expect(omniRouteProvider(false, 'sk-x').authToken).toBe('sk-x');
+    expect(omniRouteProvider().authToken).toBeUndefined(); // keyless auto path
   });
 });
 

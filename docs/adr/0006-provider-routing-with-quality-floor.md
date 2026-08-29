@@ -37,6 +37,20 @@ layer does conservative, lossless brief compaction (drop trailing whitespace,
 blank-line runs, exact duplicate lines) — the safe half of "token compression",
 never rewriting instructions to a model.
 
+**Managed OmniRoute (2026-08-27):** on request, Power now manages an OmniRoute
+instance end to end rather than only detecting one — install (`npm i -g
+omniroute`), start/stop, health via `/api/health/ping`, and open-dashboard, all
+from the Routing sheet. A run that routes to OmniRoute ensures the server is up
+before the first dispatch. OmniRoute is keyless on loopback (its `auto` model
+answers with no key), and Power maps each role to a smart alias (`auto/coding`
+for code and gate roles, cheaper routes for research/docs). This does not change
+the invariants above: OmniRoute is still a local server the user runs with their
+own accounts, still off by default, and the quality floor still holds — a
+one-click "Maximum free" toggle widens it to every role, with the quality
+trade-off stated inline, and it is the user's explicit choice, never the shipped
+default. `Provider.omniRoute(maxFree:)` / `omniRouteProvider(maxFree)` is the
+single factory both engines build it from.
+
 **Consequences:** the router, env hook, base-URL normalization, and compaction
 live in both engines (`apps/desktop/src/main/engine/providers.ts` and the
 `Provider`/`ProviderRouter` types in `apps/macos/Power/Models.swift`) and stay

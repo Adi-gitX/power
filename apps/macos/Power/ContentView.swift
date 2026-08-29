@@ -7,6 +7,7 @@ struct ContentView: View {
     @AppStorage("power.onboarded") private var hasOnboarded = false
     @StateObject private var engine = RunEngine()
     @StateObject private var devServer = DevServerManager()
+    @StateObject private var omni = OmniRouteManager()
     @State private var auth: ClaudeAuth.Status?
     @State private var signingIn = false
     @State private var currentView: MainView = .home
@@ -75,7 +76,7 @@ struct ContentView: View {
         .background(Color.shell)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: showPreview)
         .sheet(isPresented: $showRouting) {
-            RoutingSheet(providers: $providers)
+            RoutingSheet(providers: $providers, omni: omni)
         }
         .task {
             auth = await ClaudeAuth.status()
@@ -875,12 +876,27 @@ struct ContentView: View {
         guard let dir = repoDir,
               goal.trimmingCharacters(in: .whitespaces).count >= 8 else { return }
         activeGoal = goal.trimmingCharacters(in: .whitespaces)
-        engine.start(goal: activeGoal, repoDir: dir, features: features)
         goal = ""
         withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
             currentView = .run
         }
-        history = HistoryStore.read()
+        // If a run will route to OmniRoute, make sure it is up before the first
+        // dispatch hits a dead endpoint — otherwise start immediately.
+        let usesOmni = providers.contains { $0.id == omniRouteProviderID && !$0.allowRoles.isEmpty }
+        if usesOmni {
+            Task {
+                let up = await omni.ensureRunning()
+                if !up {
+                    engine.errorText = "OmniRoute routing is on but it isn't running — open Routing to install or start it."
+                    return
+                }
+                engine.start(goal: activeGoal, repoDir: dir, features: features)
+                history = HistoryStore.read()
+            }
+        } else {
+            engine.start(goal: activeGoal, repoDir: dir, features: features)
+            history = HistoryStore.read()
+        }
     }
 
     // MARK: Input bar (always visible)
@@ -2445,6 +2461,7 @@ struct SidebarButtonStyle: ButtonStyle {
 /// control.
 struct RoutingSheet: View {
     @Binding var providers: [Provider]
+    @ObservedObject var omni: OmniRouteManager
     @Environment(\.dismiss) private var dismiss
     @State private var detecting = false
     @State private var detectResult: String?
@@ -2462,17 +2479,164 @@ struct RoutingSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     intro
+                    omniRouteCard
                     claudeCard
                     ForEach($providers) { $p in
-                        if p.kind == .gateway { gatewayCard($p) }
+                        if p.kind == .gateway, p.id != omniRouteProviderID {
+                            gatewayCard($p)
+                        }
                     }
                     addRow
                 }
                 .padding(18)
             }
         }
-        .frame(width: 560, height: 560)
+        .frame(width: 560, height: 640)
         .background(Color.shell)
+        .task { await omni.refresh() }
+    }
+
+    // MARK: OmniRoute — the managed gateway
+
+    private var omniBinding: Binding<Provider>? {
+        guard let i = providers.firstIndex(where: { $0.id == omniRouteProviderID }) else { return nil }
+        return $providers[i]
+    }
+    private var omniEnabled: Bool {
+        providers.contains { $0.id == omniRouteProviderID && !$0.allowRoles.isEmpty }
+    }
+    private var omniMaxFree: Bool {
+        (providers.first { $0.id == omniRouteProviderID }?.allowRoles.count ?? 0) >= Role.allCases.count
+    }
+
+    private var omniRouteCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "bolt.horizontal.circle.fill").foregroundStyle(Color.accentSoft)
+                Text("OmniRoute").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.ink)
+                omniStatusPill
+                Spacer()
+                if omni.state == .running {
+                    Button("Dashboard") { omni.openDashboard() }
+                        .buttonStyle(.plain).font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(Color.accentSoft)
+                }
+            }
+
+            Text("A local gateway to 350+ providers — 90+ with free tiers. Power installs and runs it for you; you bring your own accounts through its dashboard. Free routing works keyless out of the box via its `auto` model.")
+                .font(.system(size: 11.5)).foregroundStyle(Color.mutedText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            omniActions
+
+            if omni.state == .installing, !omni.installLog.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 1) {
+                        ForEach(Array(omni.installLog.suffix(6).enumerated()), id: \.offset) { _, l in
+                            Text(l).font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(Color.mutedText).lineLimit(1)
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(height: 80)
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.raised))
+            }
+
+            if case .error(let msg) = omni.state {
+                Text(msg).font(.system(size: 11)).foregroundStyle(Color.orange)
+            }
+
+            Divider().overlay(Color.hairline)
+
+            // The routing switches — only meaningful once installed.
+            Toggle(isOn: Binding(
+                get: { omniEnabled },
+                set: { on in setOmni(enabled: on, maxFree: omniMaxFree) }
+            )) {
+                Text("Route through OmniRoute").font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(Color.ink)
+            }
+            .toggleStyle(.switch).tint(Color.accent)
+
+            if omniEnabled {
+                Toggle(isOn: Binding(
+                    get: { omniMaxFree },
+                    set: { max in setOmni(enabled: true, maxFree: max) }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Maximum free — route every role").font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(Color.ink)
+                        Text("Sends code, review, and verification to free models too. Cheapest possible, but weaker models fail more gates and trigger more retries — quality is the trade.")
+                            .font(.system(size: 10.5)).foregroundStyle(Color.mutedText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.switch).tint(Color.orange)
+
+                Text(omniMaxFree
+                     ? "Every role → OmniRoute. Your Claude login is used only if it's down."
+                     : "Research + docs → OmniRoute. Code and gate-graded roles stay on your Claude login.")
+                    .font(.system(size: 10.5)).foregroundStyle(Color.mutedText)
+            }
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.panel))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(omniEnabled ? Color.accentSoft.opacity(0.4) : Color.hairline))
+    }
+
+    private var omniStatusPill: some View {
+        let (text, color): (String, Color) = switch omni.state {
+        case .checking: ("checking…", Color.mutedText)
+        case .notInstalled: ("not installed", Color.mutedText)
+        case .stopped: ("stopped", Color.mutedText)
+        case .installing: ("installing…", Color.accentSoft)
+        case .starting: ("starting…", Color.accentSoft)
+        case .running: ("running", Color.green)
+        case .error: ("error", Color.orange)
+        }
+        return Text(text).font(.system(size: 10, weight: .medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(Capsule().fill(color.opacity(0.12)))
+    }
+
+    @ViewBuilder private var omniActions: some View {
+        HStack(spacing: 10) {
+            switch omni.state {
+            case .notInstalled:
+                actionButton("Install OmniRoute", "arrow.down.circle") { Task { await omni.install() } }
+            case .stopped, .error:
+                actionButton("Start", "play.fill") { Task { await omni.start() } }
+                actionButton("Re-check", "arrow.clockwise", subtle: true) { Task { await omni.refresh() } }
+            case .running:
+                actionButton("Stop", "stop.fill", subtle: true) { omni.stop() }
+            case .checking, .installing, .starting:
+                ProgressView().controlSize(.small)
+            }
+            Spacer()
+        }
+    }
+
+    private func actionButton(_ label: String, _ icon: String, subtle: Bool = false, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+                Text(label)
+            }.font(.system(size: 12, weight: .medium))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(subtle ? Color.mutedText : Color.accentSoft)
+    }
+
+    /// Add, widen, or remove the managed OmniRoute provider in one place.
+    private func setOmni(enabled: Bool, maxFree: Bool) {
+        let existingToken = providers.first { $0.id == omniRouteProviderID }?.authToken
+        providers.removeAll { $0.id == omniRouteProviderID }
+        if enabled {
+            providers.append(.omniRoute(maxFree: maxFree, authToken: existingToken))
+        }
+        ProviderStore.save(providers)
     }
 
     private var header: some View {

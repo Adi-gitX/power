@@ -171,6 +171,31 @@ struct Provider: Codable, Equatable, Identifiable {
 /// Anthropic-compatible endpoint works just as well.
 let omniRouteDefaultBase = "http://127.0.0.1:20128"
 
+/// The reserved id of the managed OmniRoute provider Power provisions itself.
+let omniRouteProviderID = "omniroute"
+
+extension Provider {
+    /// OmniRoute's smart model aliases per role: code and gate roles ask for its
+    /// coding-tuned combo, research/docs take the cheaper routes.
+    static let omniRouteModels: [Role: String] = [
+        .researcher: "auto", .documenter: "auto/cheap",
+        .architect: "auto/coding", .implementer: "auto/coding",
+        .reviewer: "auto/coding", .tester: "auto/coding", .verifier: "auto/coding",
+    ]
+
+    /// The managed OmniRoute provider. `maxFree` widens the quality floor to
+    /// every role — the "route everything free" choice — while the default keeps
+    /// the safe floor (research + docs). costWeight 0 wins the routing tie.
+    static func omniRoute(maxFree: Bool = false, authToken: String? = nil) -> Provider {
+        Provider(
+            id: omniRouteProviderID, label: "OmniRoute", kind: .gateway,
+            baseUrl: omniRouteDefaultBase, authToken: authToken,
+            allowRoles: maxFree ? Role.allCases : safeCheapRoles,
+            costWeight: 0, models: omniRouteModels
+        )
+    }
+}
+
 /// Roles safe to route to a cheap/unproven provider by default: a miss is
 /// caught by a later gate or is low-stakes prose, and re-running one is cheap.
 /// Everything a gate grades, or that writes code, stays on the trusted default.

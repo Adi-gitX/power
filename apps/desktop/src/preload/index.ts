@@ -27,6 +27,17 @@ const api = {
     ipcRenderer.invoke('power:save-providers', providers),
   detectGateway: (baseUrl?: string): Promise<boolean> =>
     ipcRenderer.invoke('power:detect-gateway', baseUrl),
+  omniStatus: (): Promise<'not-installed' | 'stopped' | 'running'> =>
+    ipcRenderer.invoke('power:omniroute-status'),
+  omniInstall: (): Promise<boolean> => ipcRenderer.invoke('power:omniroute-install'),
+  omniStart: (): Promise<boolean> => ipcRenderer.invoke('power:omniroute-start'),
+  omniStop: (): Promise<boolean> => ipcRenderer.invoke('power:omniroute-stop'),
+  omniDashboard: (): Promise<boolean> => ipcRenderer.invoke('power:omniroute-dashboard'),
+  onOmniLog: (handler: (line: string) => void): (() => void) => {
+    const listener = (_e: unknown, line: string) => handler(line);
+    ipcRenderer.on('power:omniroute-log', listener);
+    return () => ipcRenderer.removeListener('power:omniroute-log', listener);
+  },
   approve: (): Promise<void> => ipcRenderer.invoke('power:approve'),
   reject: (reason: string): Promise<void> => ipcRenderer.invoke('power:reject', reason),
   stop: (): Promise<void> => ipcRenderer.invoke('power:stop'),
