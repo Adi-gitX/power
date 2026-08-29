@@ -133,6 +133,141 @@ enum ModelPolicy {
     }
 }
 
+// MARK: - Provider layer (mirrors apps/desktop/src/main/engine/providers.ts)
+
+/// A place Power can dispatch a stage. The built-in default is your Claude
+/// login and changes nothing; a gateway redirects a stage to any Anthropic-
+/// compatible endpoint (your own OmniRoute on :20128, a cheap key) via the two
+/// environment variables Claude Code reads — `ANTHROPIC_BASE_URL` and
+/// `ANTHROPIC_AUTH_TOKEN`. Power bundles no third-party providers: the only one
+/// that exists until you add one is `claude`.
+struct Provider: Codable, Equatable, Identifiable {
+    enum Kind: String, Codable { case claudeCLI = "claude-cli", gateway }
+
+    var id: String
+    var label: String
+    var kind: Kind
+    /// Gateway only: the Anthropic-compatible base URL.
+    var baseUrl: String?
+    /// Gateway only: the token the gateway expects. Stored in the app's own
+    /// config, only ever placed into a single spawn's environment.
+    var authToken: String?
+    /// The quality floor: roles this provider is trusted to serve. The router
+    /// never routes a role here unless it is in this list.
+    var allowRoles: [Role]
+    /// Routing weight — lower wins, 0 = free.
+    var costWeight: Int
+    /// Optional per-role `--model` override the gateway wants.
+    var models: [Role: String]?
+
+    /// The built-in default: your Claude login, trusted with every role.
+    static let claudeDefault = Provider(
+        id: "claude", label: "Claude (your login)", kind: .claudeCLI,
+        baseUrl: nil, authToken: nil, allowRoles: Role.allCases, costWeight: 10, models: nil
+    )
+}
+
+/// OmniRoute's documented default port. Detection probes here; any other
+/// Anthropic-compatible endpoint works just as well.
+let omniRouteDefaultBase = "http://127.0.0.1:20128"
+
+/// Roles safe to route to a cheap/unproven provider by default: a miss is
+/// caught by a later gate or is low-stakes prose, and re-running one is cheap.
+/// Everything a gate grades, or that writes code, stays on the trusted default.
+let safeCheapRoles: [Role] = [.researcher, .documenter]
+
+enum ProviderRouter {
+    /// Choose the provider for one role: among providers whose quality floor
+    /// lists this role, lowest cost weight wins; the built-in default is always
+    /// a candidate, so a role no cheap provider is trusted with stays on Claude.
+    static func choose(_ role: Role, from providers: [Provider]) -> Provider {
+        let pool = [Provider.claudeDefault] + providers.filter { $0.id != "claude" }
+        let eligible = pool.filter { $0.allowRoles.contains(role) }
+        return eligible.min { $0.costWeight < $1.costWeight } ?? .claudeDefault
+    }
+
+    /// The env overlay a provider needs — {} for the default, exactly the two
+    /// redirect vars for a gateway. Applied to one dispatch only.
+    static func env(for p: Provider) -> [String: String] {
+        guard p.kind == .gateway, let base = p.baseUrl else { return [:] }
+        var env = ["ANTHROPIC_BASE_URL": normalizeBaseUrl(base)]
+        if let token = p.authToken, !token.isEmpty { env["ANTHROPIC_AUTH_TOKEN"] = token }
+        return env
+    }
+
+    /// Claude Code wants the base URL without a trailing slash or `/v1`.
+    static func normalizeBaseUrl(_ raw: String) -> String {
+        var url = raw.trimmingCharacters(in: .whitespaces)
+        while url.hasSuffix("/") { url.removeLast() }
+        if url.hasSuffix("/v1") { url.removeLast(3) }
+        return url
+    }
+
+    /// Conservative, lossless brief compaction — the safe half of "token
+    /// compression": drop trailing whitespace, runs of blank lines, and exact
+    /// consecutive duplicates. Never rewrites instructions.
+    static func compact(_ lines: [String]) -> [String] {
+        var out: [String] = []
+        var blanks = 0
+        for raw in lines {
+            var line = raw
+            while line.hasSuffix(" ") || line.hasSuffix("\t") { line.removeLast() }
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                blanks += 1
+                if blanks > 1 { continue }
+            } else {
+                blanks = 0
+            }
+            if let last = out.last, last == line, !line.trimmingCharacters(in: .whitespaces).isEmpty {
+                continue
+            }
+            out.append(line)
+        }
+        while let last = out.last, last.trimmingCharacters(in: .whitespaces).isEmpty { out.removeLast() }
+        return out
+    }
+}
+
+/// The user's configured providers, persisted. The default is implicit and
+/// never stored; this holds only the additions.
+enum ProviderStore {
+    private static let key = "power.providers"
+
+    static func load() -> [Provider] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let list = try? JSONDecoder().decode([Provider].self, from: data)
+        else { return [] }
+        return list
+    }
+
+    static func save(_ providers: [Provider]) {
+        if let data = try? JSONEncoder().encode(providers) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+        NotificationCenter.default.post(name: .powerProvidersChanged, object: nil)
+    }
+
+    /// Probe a gateway to see if something is actually listening — used to offer
+    /// a running OmniRoute without the user knowing its port. Any HTTP response
+    /// (even 401/404) proves reachability.
+    static func detect(_ base: String = omniRouteDefaultBase, timeout: TimeInterval = 0.8) async -> Bool {
+        guard let url = URL(string: ProviderRouter.normalizeBaseUrl(base)) else { return false }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = timeout
+        req.httpMethod = "GET"
+        do {
+            let (_, response) = try await URLSession.shared.data(for: req)
+            return (response as? HTTPURLResponse)?.statusCode ?? 0 > 0
+        } catch {
+            return false
+        }
+    }
+}
+
+extension Notification.Name {
+    static let powerProvidersChanged = Notification.Name("powerProvidersChanged")
+}
+
 // MARK: - Run snapshots (persist full timeline for session restore)
 
 struct RunSnapshot: Codable {

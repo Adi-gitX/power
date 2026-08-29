@@ -36,6 +36,11 @@ struct ContentView: View {
     @State private var previewTab: PreviewTab = .render
     @State private var webReloadToken = 0
 
+    /// Provider routing: the extra providers configured, and the sheet to edit
+    /// them. The built-in Claude default is implicit and never stored here.
+    @State private var providers = ProviderStore.load()
+    @State private var showRouting = false
+
     enum PreviewTab { case render, files }
 
     enum MainView: Equatable { case home, run, chat }
@@ -69,6 +74,9 @@ struct ContentView: View {
         }
         .background(Color.shell)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: showPreview)
+        .sheet(isPresented: $showRouting) {
+            RoutingSheet(providers: $providers)
+        }
         .task {
             auth = await ClaudeAuth.status()
         }
@@ -367,6 +375,20 @@ struct ContentView: View {
                         .foregroundStyle(Color.mutedText)
                         .contentTransition(.numericText())
                         .animation(.spring(response: 0.3), value: engine.totalCostUsd)
+                }
+
+                // When any stage ran off Claude, name the saving: how many turns
+                // the gateways served, so a routed run reads honestly.
+                if let routed = routedTurns, routed > 0 {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.triangle.branch").font(.system(size: 9, weight: .bold))
+                        Text("\(routed)t routed off Claude")
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.accentSoft)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Capsule().fill(Color.accentSoft.opacity(0.1)))
+                    .help("Turns served by a configured provider instead of your Claude login")
                 }
 
                 Text(statusWord)
@@ -780,8 +802,38 @@ struct ContentView: View {
             toggleChip("Docs", \.docs)
             toggleChip("Auto-approve", \.autoApprove)
             toggleChip("Packs", \.packs)
+            routingChip
             Spacer(minLength: 0)
         }
+    }
+
+    /// Turns served by a non-Claude provider this run — the honest saving.
+    private var routedTurns: Int? {
+        let sum = engine.costByProvider
+            .filter { $0.key != Provider.claudeDefault.id }
+            .reduce(0) { $0 + $1.value.turns }
+        return sum > 0 ? sum : nil
+    }
+
+    /// The routing affordance: opens the provider sheet. Shows a count when the
+    /// user has configured gateways, so a routed run never looks like a plain one.
+    private var routingChip: some View {
+        let routed = providers.contains { $0.kind == .gateway && !$0.allowRoles.isEmpty }
+        return Button {
+            showRouting = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.triangle.branch").font(.system(size: 10, weight: .semibold))
+                Text(routed ? "Routing · \(providers.count)" : "Routing")
+            }
+        }
+        .buttonStyle(.plain)
+        .font(.system(size: 11.5, weight: routed ? .semibold : .medium))
+        .foregroundStyle(routed ? Color.accentSoft : Color.mutedText)
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(Capsule().fill(routed ? Color.accentSoft.opacity(0.1) : .clear))
+        .overlay(Capsule().stroke(routed ? Color.accentSoft.opacity(0.5) : Color.hairline))
+        .help("Route stages to a cheaper provider or a local gateway (OmniRoute)")
     }
 
     private func toggleChip(_ label: String, _ path: WritableKeyPath<RunFeatures, Bool>) -> some View {
@@ -2380,5 +2432,231 @@ struct SidebarButtonStyle: ButtonStyle {
             .contentShape(Rectangle())
             .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
             .animation(.spring(response: 0.2), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Routing (provider) sheet
+
+/// Where the user configures cost routing. The built-in Claude default is shown
+/// but locked — it always exists and always serves every role. Gateways are the
+/// only thing that can be added, each redirecting a chosen set of roles to an
+/// Anthropic-compatible endpoint the user runs. Power ships no providers of its
+/// own; nothing here routes anywhere until the user adds an endpoint they
+/// control.
+struct RoutingSheet: View {
+    @Binding var providers: [Provider]
+    @Environment(\.dismiss) private var dismiss
+    @State private var detecting = false
+    @State private var detectResult: String?
+
+    /// The roles offered as a quality floor, low-stakes first. Code-writing and
+    /// gate-graded roles are last and off by default — the guardrail is visible.
+    private let roleOrder: [Role] = [
+        .researcher, .documenter, .architect, .reviewer, .tester, .verifier, .implementer,
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider().overlay(Color.hairline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    intro
+                    claudeCard
+                    ForEach($providers) { $p in
+                        if p.kind == .gateway { gatewayCard($p) }
+                    }
+                    addRow
+                }
+                .padding(18)
+            }
+        }
+        .frame(width: 560, height: 560)
+        .background(Color.shell)
+    }
+
+    private var header: some View {
+        HStack {
+            Text("Routing").font(.system(size: 15, weight: .semibold)).foregroundStyle(Color.ink)
+            Spacer()
+            Button("Done") { save(); dismiss() }
+                .buttonStyle(.plain)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.accentSoft)
+        }
+        .padding(.horizontal, 18).padding(.vertical, 14)
+    }
+
+    private var intro: some View {
+        Text("Send stages to a cheaper provider or your own local gateway (like OmniRoute on :20128). Power keeps every code-writing and gate-graded role on your trusted Claude login unless you widen the floor yourself — so cost drops where it is safe, and the gates it must pass stay honest.")
+            .font(.system(size: 12)).foregroundStyle(Color.mutedText)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var claudeCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.seal.fill").foregroundStyle(Color.accentSoft)
+                Text(Provider.claudeDefault.label).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.ink)
+                Spacer()
+                Text("default · all roles").font(.system(size: 11)).foregroundStyle(Color.mutedText)
+            }
+            Text("Your normal login. Always present, always trusted with every role. Nothing to configure.")
+                .font(.system(size: 11)).foregroundStyle(Color.mutedText)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.panel))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.hairline))
+    }
+
+    private func gatewayCard(_ p: Binding<Provider>) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.triangle.branch").foregroundStyle(Color.accentSoft)
+                TextField("Label", text: p.label)
+                    .textFieldStyle(.plain).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.ink)
+                Spacer()
+                Button {
+                    providers.removeAll { $0.id == p.wrappedValue.id }
+                } label: {
+                    Image(systemName: "trash").font(.system(size: 11))
+                }
+                .buttonStyle(.plain).foregroundStyle(Color.mutedText)
+            }
+            field("Base URL", text: Binding(
+                get: { p.wrappedValue.baseUrl ?? "" },
+                set: { p.wrappedValue.baseUrl = $0 }
+            ), placeholder: omniRouteDefaultBase)
+            field("Auth token (optional)", text: Binding(
+                get: { p.wrappedValue.authToken ?? "" },
+                set: { p.wrappedValue.authToken = $0.isEmpty ? nil : $0 }
+            ), placeholder: "from the gateway dashboard", secure: true)
+
+            Text("Trusted with these roles").font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.mutedText)
+            FlowRoles(roleOrder: roleOrder, provider: p)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.panel))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.hairline))
+    }
+
+    private func field(_ label: String, text: Binding<String>, placeholder: String, secure: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label).font(.system(size: 10.5)).foregroundStyle(Color.mutedText)
+            Group {
+                if secure { SecureField(placeholder, text: text) }
+                else { TextField(placeholder, text: text) }
+            }
+            .textFieldStyle(.plain).font(.system(size: 12, design: .monospaced))
+            .foregroundStyle(Color.ink)
+            .padding(.horizontal, 9).padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color.raised))
+        }
+    }
+
+    private var addRow: some View {
+        HStack(spacing: 10) {
+            Button {
+                Task { await detect() }
+            } label: {
+                HStack(spacing: 5) {
+                    if detecting { ProgressView().controlSize(.small) }
+                    else { Image(systemName: "dot.radiowaves.left.and.right") }
+                    Text("Detect local gateway")
+                }
+                .font(.system(size: 12, weight: .medium))
+            }
+            .buttonStyle(.plain).foregroundStyle(Color.accentSoft)
+            .disabled(detecting)
+
+            Button {
+                addCustom()
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "plus")
+                    Text("Add gateway")
+                }
+                .font(.system(size: 12, weight: .medium))
+            }
+            .buttonStyle(.plain).foregroundStyle(Color.mutedText)
+
+            Spacer()
+            if let detectResult {
+                Text(detectResult).font(.system(size: 11)).foregroundStyle(Color.mutedText)
+            }
+        }
+    }
+
+    private func detect() async {
+        detecting = true; detectResult = nil
+        let found = await ProviderStore.detect()
+        detecting = false
+        if found {
+            if !providers.contains(where: { $0.baseUrl.map(ProviderRouter.normalizeBaseUrl) == ProviderRouter.normalizeBaseUrl(omniRouteDefaultBase) }) {
+                providers.append(Provider(
+                    id: "omniroute-\(UUID().uuidString.prefix(8))",
+                    label: "OmniRoute (local)", kind: .gateway,
+                    baseUrl: omniRouteDefaultBase, authToken: nil,
+                    allowRoles: safeCheapRoles, costWeight: 0, models: nil
+                ))
+                detectResult = "Found — added, trusted with research + docs"
+            } else {
+                detectResult = "Already configured"
+            }
+            save()
+        } else {
+            detectResult = "Nothing on \(omniRouteDefaultBase)"
+        }
+    }
+
+    private func addCustom() {
+        providers.append(Provider(
+            id: "gw-\(UUID().uuidString.prefix(8))",
+            label: "New gateway", kind: .gateway,
+            baseUrl: "", authToken: nil,
+            allowRoles: safeCheapRoles, costWeight: 1, models: nil
+        ))
+    }
+
+    private func save() {
+        // Drop half-configured gateways (no base URL) so a router never points
+        // at nothing.
+        providers = providers.filter { $0.kind != .gateway || !($0.baseUrl ?? "").isEmpty }
+        ProviderStore.save(providers)
+    }
+}
+
+/// The role quality-floor toggles for one gateway.
+private struct FlowRoles: View {
+    let roleOrder: [Role]
+    @Binding var provider: Provider
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 6)], alignment: .leading, spacing: 6) {
+            ForEach(roleOrder, id: \.self) { role in
+                let on = provider.allowRoles.contains(role)
+                let safe = safeCheapRoles.contains(role)
+                Button {
+                    if on { provider.allowRoles.removeAll { $0 == role } }
+                    else { provider.allowRoles.append(role) }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 10))
+                        Text(role.rawValue).font(.system(size: 11, weight: on ? .semibold : .regular))
+                        if !safe { Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 8)) }
+                    }
+                    .foregroundStyle(on ? (safe ? Color.accentSoft : Color.orange) : Color.mutedText)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Capsule().fill(on ? Color.accentSoft.opacity(0.1) : .clear))
+                    .overlay(Capsule().stroke(on ? Color.accentSoft.opacity(0.4) : Color.hairline))
+                }
+                .buttonStyle(.plain)
+                .help(safe ? "Low-stakes — safe to route" : "Code-writing or gate-graded — routing here risks gate failures and retries")
+            }
+        }
     }
 }

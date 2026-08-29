@@ -41,6 +41,11 @@ final class RunEngine: ObservableObject {
     private var repoDir = ""
     private var goal = ""
     private var features = RunFeatures()
+    /// Extra providers the user configured; the Claude default is implicit.
+    private var providers: [Provider] = []
+    /// Cost and turns per provider that served a stage — the honest savings
+    /// story surfaced in the run header.
+    @Published var costByProvider: [String: StageUsage] = [:]
     private var powerRoot: URL!
     /// The history row / transcript this run belongs to. A continuation reuses
     /// the original session's id, which is what makes one title accumulate an
@@ -126,6 +131,7 @@ final class RunEngine: ObservableObject {
         self.goal = goal
         self.repoDir = repoDir
         self.features = features
+        self.providers = ProviderStore.load()
 
         // A continuation archives the finished run's state file — the reducer
         // rightly refuses to init over a live run — and keeps the artifacts in
@@ -142,7 +148,7 @@ final class RunEngine: ObservableObject {
             }
         }
         stages = [:]; stageOrder = []; lines = [:]; gates = [:]; retries = [:]
-        usage = [:]; totalCostUsd = 0
+        usage = [:]; totalCostUsd = 0; costByProvider = [:]
         specText = nil; blocked = nil; done = nil; errorText = nil
         stopped = false
         running = true
@@ -422,12 +428,21 @@ final class RunEngine: ObservableObject {
         brief: [String],
         resume: String? = nil
     ) async throws {
+        // Route first: the cheapest provider trusted with this role. The Claude
+        // default is always eligible, so a role no cheap provider is trusted
+        // with stays on Claude — no behaviour change from before providers.
+        let provider = ProviderRouter.choose(role, from: providers)
+        if provider.id != Provider.claudeDefault.id {
+            appendLine("→ \(role.rawValue) routed to \(provider.label)", to: stage)
+        }
+        // Conservative, lossless compaction — the safe half of token compression.
+        let compact = ProviderRouter.compact(brief)
         // A resumed dispatch talks to the session that already holds the role
         // prompt, the repo context, and everything it read — so the brief is
         // ONLY the fix. A cold dispatch carries the full identity.
         let dispatchText: String
         if resume != nil {
-            dispatchText = brief.joined(separator: "\n")
+            dispatchText = compact.joined(separator: "\n")
         } else {
             dispatchText = ([
                 "You are being dispatched as the \(role.rawValue) on a Power run.",
@@ -435,7 +450,7 @@ final class RunEngine: ObservableObject {
                 "Repository (absolute path): \(repoDir)",
                 "Artifacts directory: \(repoDir)/.power/artifacts",
                 "",
-            ] + brief + [
+            ] + compact + [
                 "",
                 "Use absolute paths throughout. Write only the artifacts your role owns.",
             ]).joined(separator: "\n")
@@ -467,10 +482,13 @@ final class RunEngine: ObservableObject {
                 "--max-turns", String(maxTurns(for: role)),
             ]
         }
+        // A gateway may name the model it fronts; otherwise the stage's normal
+        // model name is passed through for the gateway to map.
+        let resolvedModel = provider.models?[role] ?? model(for: role)
         args += [
             "--permission-mode", "acceptEdits",
             "--add-dir", repoDir,
-            "--model", model(for: role),
+            "--model", resolvedModel,
             // stream-json is what makes cost visible: assistant frames carry
             // the card's text, the result frame carries cost and turns.
             "--output-format", "stream-json",
@@ -478,12 +496,16 @@ final class RunEngine: ObservableObject {
         ]
 
         lastAgentSession = nil
-        _ = try await exec("claude", args) { [weak self] line in
-            self?.consumeStreamLine(line, role: role, stage: stage)
+        // A gateway redirects this one dispatch by overlaying the two Claude
+        // Code env vars — never mutating the app's environment.
+        _ = try await exec("claude", args, env: ProviderRouter.env(for: provider)) { [weak self] line in
+            self?.consumeStreamLine(line, role: role, stage: stage, provider: provider)
         }
     }
 
-    private func consumeStreamLine(_ line: String, role: Role, stage: StageID) {
+    private func consumeStreamLine(
+        _ line: String, role: Role, stage: StageID, provider: Provider = .claudeDefault
+    ) {
         guard line.hasPrefix("{"),
               let data = line.data(using: .utf8),
               let frame = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -514,6 +536,12 @@ final class RunEngine: ObservableObject {
                 model: model(for: role)
             )
             totalCostUsd += cost
+            let priorP = costByProvider[provider.id]
+            costByProvider[provider.id] = StageUsage(
+                costUsd: (priorP?.costUsd ?? 0) + cost,
+                turns: (priorP?.turns ?? 0) + turns,
+                model: provider.label
+            )
             if let sid = frame["session_id"] as? String { lastAgentSession = sid }
         default:
             break // tool-use noise never reaches the card
@@ -593,6 +621,7 @@ final class RunEngine: ObservableObject {
     private func exec(
         _ cmd: String,
         _ args: [String],
+        env envOverlay: [String: String] = [:],
         onLine: (@MainActor (String) -> Void)? = nil
     ) async throws -> String {
         let process = Process()
@@ -601,6 +630,9 @@ final class RunEngine: ObservableObject {
         process.currentDirectoryURL = URL(fileURLWithPath: repoDir)
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = PowerPaths.spawnPATH
+        // A gateway provider overlays ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN
+        // onto this one spawn — the app's own environment is never touched.
+        for (k, v) in envOverlay { env[k] = v }
         process.environment = env
 
         let pipe = Pipe()

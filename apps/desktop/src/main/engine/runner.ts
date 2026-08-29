@@ -25,6 +25,13 @@ import {
   type RunFeatures,
   type StageId,
 } from './types.js';
+import {
+  CLAUDE_DEFAULT,
+  chooseProvider,
+  compactBrief,
+  providerEnv,
+  type Provider,
+} from './providers.js';
 
 /**
  * Cost discipline, per role. The registry already decided researcher and
@@ -86,13 +93,15 @@ export function claudeArgs(
   features: RunFeatures,
   goal = '',
   resume?: string,
+  modelOverride?: string,
 ): string[] {
   const complex = goalIsComplex(goal);
   const model =
-    features.tier === 'eco' ? 'sonnet'
+    modelOverride ??
+    (features.tier === 'eco' ? 'sonnet'
     : features.tier === 'max' ? 'opus'
     : features.tier === 'auto' ? (complex ? (ROLE_MODEL[role] ?? 'sonnet') : 'sonnet')
-    : (ROLE_MODEL[role] ?? 'sonnet');
+    : (ROLE_MODEL[role] ?? 'sonnet'));
   const mult = features.tier === 'auto' ? (complex ? 1 : 0.7) : TIER_CAP_MULTIPLIER[features.tier];
   const turns = Math.round((ROLE_MAX_TURNS[role] ?? 30) * mult);
   const args = ['-p', dispatch];
@@ -180,13 +189,21 @@ export class PowerRun extends EventEmitter {
   private stopped = false;
   private activeChild: ReturnType<typeof spawn> | null = null;
   private readonly features: RunFeatures;
+  private readonly providers: Provider[];
   private totalCostUsd = 0;
+  /** Cost and turns attributed to each provider that served a stage — the
+   * honest savings story: where the spend went, and how much left Anthropic. */
+  private readonly costByProvider = new Map<string, { label: string; costUsd: number; turns: number }>();
+  /** The env overlay of the dispatch currently streaming, so its usage frame is
+   * attributed to the right provider. */
+  private activeProvider: Provider = CLAUDE_DEFAULT;
   /** The claude session of the most recent dispatch — what a retry resumes. */
   private lastAgentSession: string | null = null;
 
   constructor(private readonly opts: EngineOptions) {
     super();
     this.features = opts.features ?? DEFAULT_FEATURES;
+    this.providers = opts.providers ?? [];
   }
 
   private emitEvent(event: RunEvent): void {
@@ -206,15 +223,23 @@ export class PowerRun extends EventEmitter {
     this.activeChild?.kill('SIGTERM');
   }
 
-  private exec(cmd: string, args: string[], onLine?: (line: string) => void): Promise<string> {
+  private exec(
+    cmd: string,
+    args: string[],
+    onLine?: (line: string) => void,
+    envOverlay?: Record<string, string>,
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
       // `node` runs as ourselves: under Electron, execPath + ELECTRON_RUN_AS_NODE
       // is a plain node, so a Finder-launched app (PATH=/usr/bin:/bin) needs no
       // node installed on PATH. Under vitest execPath already is node.
       const viaSelf = cmd === 'node';
+      const baseEnv = viaSelf ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' } : { ...process.env };
+      // A gateway provider redirects this one dispatch by overlaying
+      // ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN — never mutating the app's env.
       const child = spawn(viaSelf ? process.execPath : cmd, args, {
         cwd: this.opts.repoDir,
-        env: viaSelf ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' } : process.env,
+        env: { ...baseEnv, ...(envOverlay ?? {}) },
       });
       this.activeChild = child;
       let out = '';
@@ -268,20 +293,33 @@ export class PowerRun extends EventEmitter {
   /** Dispatch one specialist, exactly as jobs/build.md specifies a dispatch. */
   private async dispatch(role: Role, briefLines: string[], resume?: string): Promise<void> {
     const promptPath = join(this.opts.powerRoot, 'agents', `${role}.md`);
+    // Route first: the cheapest provider trusted with this role. The built-in
+    // Claude default is always eligible, so a role no cheap provider is trusted
+    // with simply stays on Claude — no behaviour change from before providers.
+    const provider = chooseProvider(role, this.providers);
+    this.activeProvider = provider;
+    if (provider.id !== CLAUDE_DEFAULT.id) {
+      this.emitEvent({ type: 'route', role, providerId: provider.id, providerLabel: provider.label });
+    }
+    // Conservative, lossless compaction — the safe half of token compression.
+    const { lines: compact } = compactBrief(briefLines);
     // A resumed dispatch talks to the warm session: the brief IS the payload.
     const dispatch = resume
-      ? briefLines.join('\n')
+      ? compact.join('\n')
       : [
           `You are being dispatched as the ${role} on a Power run.`,
           '',
           `Repository (absolute path): ${this.opts.repoDir}`,
           `Artifacts directory: ${join(this.opts.repoDir, '.power', 'artifacts')}`,
           '',
-          ...briefLines,
+          ...compact,
           '',
           'Use absolute paths throughout. Write only the artifacts your role owns.',
         ].join('\n');
 
+    // A gateway may name the model it fronts; otherwise the stage's normal
+    // model name is passed through for the gateway to map.
+    const modelOverride = provider.models?.[role];
     const command = this.opts.agentCommand
       ? this.opts.agentCommand(role, dispatch)
       : {
@@ -294,27 +332,50 @@ export class PowerRun extends EventEmitter {
             this.features,
             this.opts.goal,
             resume,
+            modelOverride,
           ),
         };
 
     this.lastAgentSession = null;
-    await this.exec(command.cmd, command.args, (line) => {
-      const parsed = parseStreamLine(line);
-      if (parsed.kind === 'session') {
-        this.lastAgentSession = parsed.sessionId;
-      } else if (parsed.kind === 'text') {
-        for (const part of parsed.text.split('\n')) {
-          if (part.trim()) this.emitEvent({ type: 'agent', role, line: part });
+    await this.exec(
+      command.cmd,
+      command.args,
+      (line) => {
+        const parsed = parseStreamLine(line);
+        if (parsed.kind === 'session') {
+          this.lastAgentSession = parsed.sessionId;
+        } else if (parsed.kind === 'text') {
+          for (const part of parsed.text.split('\n')) {
+            if (part.trim()) this.emitEvent({ type: 'agent', role, line: part });
+          }
+        } else if (parsed.kind === 'raw') {
+          this.emitEvent({ type: 'agent', role, line: parsed.line });
+        } else if (parsed.kind === 'usage') {
+          if (parsed.sessionId) this.lastAgentSession = parsed.sessionId;
+          this.totalCostUsd += parsed.costUsd;
+          const acc = this.costByProvider.get(provider.id) ?? {
+            label: provider.label,
+            costUsd: 0,
+            turns: 0,
+          };
+          acc.costUsd += parsed.costUsd;
+          acc.turns += parsed.turns;
+          this.costByProvider.set(provider.id, acc);
+          this.emitEvent({ type: 'agent_usage', role, costUsd: parsed.costUsd, turns: parsed.turns });
+          this.emitEvent({
+            type: 'run_usage',
+            costUsd: this.totalCostUsd,
+            byProvider: [...this.costByProvider.entries()].map(([id, v]) => ({
+              providerId: id,
+              label: v.label,
+              costUsd: v.costUsd,
+              turns: v.turns,
+            })),
+          });
         }
-      } else if (parsed.kind === 'raw') {
-        this.emitEvent({ type: 'agent', role, line: parsed.line });
-      } else if (parsed.kind === 'usage') {
-        if (parsed.sessionId) this.lastAgentSession = parsed.sessionId;
-        this.totalCostUsd += parsed.costUsd;
-        this.emitEvent({ type: 'agent_usage', role, costUsd: parsed.costUsd, turns: parsed.turns });
-        this.emitEvent({ type: 'run_usage', costUsd: this.totalCostUsd });
-      }
-    });
+      },
+      providerEnv(provider),
+    );
   }
 
   /**

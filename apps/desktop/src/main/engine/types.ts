@@ -31,7 +31,12 @@ export type RunEvent =
   | { type: 'gate'; stage: 'research' | 'spec' | 'verification'; pass: boolean; detail: string }
   | { type: 'retry'; edge: string; used: number; cap: number; reason: string }
   | { type: 'agent_usage'; role: Role; costUsd: number; turns: number }
-  | { type: 'run_usage'; costUsd: number }
+  | { type: 'route'; role: Role; providerId: string; providerLabel: string }
+  | {
+      type: 'run_usage';
+      costUsd: number;
+      byProvider?: { providerId: string; label: string; costUsd: number; turns: number }[];
+    }
   | { type: 'needs_approval'; specPath: string }
   | { type: 'state'; raw: string }
   | { type: 'blocked'; reason: string }
@@ -68,6 +73,13 @@ export interface EngineOptions {
   features?: RunFeatures;
   /** Absolute path of the Power plugin root (scripts/, agents/). */
   powerRoot: string;
+  /**
+   * Extra providers the user has configured (gateways, cheap keys). The
+   * built-in Claude default is always present implicitly; this is only the
+   * additions. Empty/omitted = every stage runs on your Claude login, exactly
+   * as before this feature existed.
+   */
+  providers?: import('./providers.js').Provider[];
   /**
    * Command used to dispatch one agent stage. The default spawns the `claude`
    * CLI headless. Tests inject a mock that writes artifacts directly, which is

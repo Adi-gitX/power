@@ -195,8 +195,31 @@ function updateLatestRun(patch: Record<string, unknown>): void {
   writeFileSync(historyPath(), JSON.stringify(rows, null, 2));
 }
 
+/** Configured providers (gateways). One JSON file in userData; the Claude
+ * default is implicit and never stored. Mirrors Swift's ProviderStore. */
+function providersPath(): string {
+  return join(app.getPath('userData'), 'providers.json');
+}
+function readProviders(): unknown[] {
+  try {
+    return JSON.parse(readFileSync(providersPath(), 'utf8'));
+  } catch {
+    return [];
+  }
+}
+
 app.whenReady().then(() => {
   ipcMain.handle('power:history', () => readHistory());
+
+  ipcMain.handle('power:providers', () => readProviders());
+  ipcMain.handle('power:save-providers', (_e, providers: unknown[]) => {
+    writeFileSync(providersPath(), JSON.stringify(providers ?? [], null, 2));
+    return true;
+  });
+  ipcMain.handle('power:detect-gateway', async (_e, baseUrl?: string) => {
+    const { detectGateway } = await import('./engine/providers.js');
+    return detectGateway(baseUrl);
+  });
 
   ipcMain.handle('power:pick-repo', async () => {
     const result = await dialog.showOpenDialog({
@@ -218,6 +241,7 @@ app.whenReady().then(() => {
       repoDir,
       goal,
       features: features ?? DEFAULT_FEATURES,
+      providers: readProviders() as never,
       powerRoot: POWER_ROOT,
       // The test harness swaps the model for fixture-writing mocks; production
       // dispatches through the user's own `claude` CLI login.

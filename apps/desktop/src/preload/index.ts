@@ -22,6 +22,11 @@ const api = {
     features?: Record<string, unknown>,
   ): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('power:start-run', repoDir, goal, features),
+  providers: (): Promise<Record<string, unknown>[]> => ipcRenderer.invoke('power:providers'),
+  saveProviders: (providers: Record<string, unknown>[]): Promise<boolean> =>
+    ipcRenderer.invoke('power:save-providers', providers),
+  detectGateway: (baseUrl?: string): Promise<boolean> =>
+    ipcRenderer.invoke('power:detect-gateway', baseUrl),
   approve: (): Promise<void> => ipcRenderer.invoke('power:approve'),
   reject: (reason: string): Promise<void> => ipcRenderer.invoke('power:reject', reason),
   stop: (): Promise<void> => ipcRenderer.invoke('power:stop'),
