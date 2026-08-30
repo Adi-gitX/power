@@ -111,6 +111,21 @@ describe('managed OmniRoute provider', () => {
     expect(omniRouteProvider(false, 'sk-x').authToken).toBe('sk-x');
     expect(omniRouteProvider().authToken).toBeUndefined(); // keyless auto path
   });
+
+  it('defaults to stacked compression and emits the OmniRoute header', () => {
+    const p = omniRouteProvider();
+    expect(p.compression).toBe('stacked');
+    expect(providerEnv(p).ANTHROPIC_CUSTOM_HEADERS).toBe('x-omniroute-compression: stacked');
+  });
+
+  it('sends NO compression header when compression is off', () => {
+    const p = omniRouteProvider(false, undefined, 'off');
+    expect(providerEnv(p)).not.toHaveProperty('ANTHROPIC_CUSTOM_HEADERS');
+  });
+
+  it('the built-in Claude default never gets a compression header', () => {
+    expect(providerEnv(CLAUDE_DEFAULT)).not.toHaveProperty('ANTHROPIC_CUSTOM_HEADERS');
+  });
 });
 
 describe('brief compaction (lossless)', () => {

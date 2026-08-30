@@ -58,7 +58,9 @@ final class OmniRouteManager: ObservableObject {
         var req = URLRequest(url: url); req.timeoutInterval = timeout
         do {
             let (_, response) = try await URLSession.shared.data(for: req)
-            return (response as? HTTPURLResponse)?.statusCode == 200
+            // Any 2xx = alive — matches the TS lifecycle's res.ok.
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            return (200..<300).contains(code)
         } catch { return false }
     }
 
@@ -74,11 +76,27 @@ final class OmniRouteManager: ObservableObject {
         if ok { await refresh() } else { state = .error("Install failed — see the log.") }
     }
 
+    /// Guards against two near-simultaneous start()s (a pre-run ensureRunning
+    /// racing the sheet's Start button) each spawning a server and orphaning one.
+    private var starting = false
+
     /// Start the server (idempotent: adopts a running instance) and wait for the
     /// health ping. Returns true once it answers.
     @discardableResult
     func start(waitFor seconds: Int = 30) async -> Bool {
-        if await ping() { state = .running; return true }
+        // Already up? Adopt it — and make sure it stays supervised even on this
+        // early path, or a monitor that respawned us would exit unmonitored.
+        if await ping() { state = .running; startMonitor(); return true }
+        if starting {
+            // Another start() is in flight — wait for it rather than double-spawn.
+            for _ in 0..<(seconds * 2) {
+                if await ping() { state = .running; return true }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+            return false
+        }
+        starting = true
+        defer { starting = false }
         state = .starting
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -86,7 +104,11 @@ final class OmniRouteManager: ObservableObject {
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = PowerPaths.spawnPATH
         p.environment = env
-        p.standardOutput = Pipe(); p.standardError = Pipe()
+        // Discard the server's output. A long-running server logs per request;
+        // an undrained Pipe fills its OS buffer (~16–64KB) and blocks the child
+        // forever, wedging the gateway. nullDevice mirrors the TS stdio:'ignore'.
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
         do { try p.run() } catch { state = .error("Could not launch omniroute."); return false }
         server = p
         for _ in 0..<(seconds * 2) {

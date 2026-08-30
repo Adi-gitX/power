@@ -2508,6 +2508,9 @@ struct RoutingSheet: View {
     private var omniMaxFree: Bool {
         (providers.first { $0.id == omniRouteProviderID }?.allowRoles.count ?? 0) >= Role.allCases.count
     }
+    private var omniCompression: String {
+        providers.first { $0.id == omniRouteProviderID }?.compression ?? "stacked"
+    }
 
     private var omniRouteCard: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -2578,6 +2581,35 @@ struct RoutingSheet: View {
                      ? "Every role → OmniRoute. Your Claude login is used only if it's down."
                      : "Research + docs → OmniRoute. Code and gate-graded roles stay on your Claude login.")
                     .font(.system(size: 10.5)).foregroundStyle(Color.mutedText)
+
+                Divider().overlay(Color.hairline)
+
+                // Compression — OmniRoute trims the request before the upstream
+                // model. Safe: it compresses noisy tool output, not code, and is
+                // cache-aware so it never breaks warm-session reuse.
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Compression — fewer tokens per request")
+                        .font(.system(size: 12.5, weight: .medium)).foregroundStyle(Color.ink)
+                    HStack(spacing: 0) {
+                        ForEach([("Off", "off"), ("Standard", "standard"), ("Max", "stacked")], id: \.1) { pair in
+                            let on = omniCompression == pair.1
+                            Button(pair.0) { setOmni(enabled: true, maxFree: omniMaxFree, compression: pair.1) }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11.5, weight: on ? .semibold : .medium))
+                                .foregroundStyle(on ? Color.ink : Color.mutedText)
+                                .padding(.horizontal, 12).padding(.vertical, 5)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(on ? Color.raised : .clear))
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.hairline))
+                    Text(omniCompression == "stacked"
+                         ? "Max: RTK→Caveman, up to ~89% off tool output. Best savings."
+                         : omniCompression == "standard"
+                         ? "Standard: filler removal, ~30% off. Conservative."
+                         : "Off: requests sent whole.")
+                        .font(.system(size: 10.5)).foregroundStyle(Color.mutedText)
+                }
             }
         }
         .padding(14)
@@ -2630,11 +2662,13 @@ struct RoutingSheet: View {
     }
 
     /// Add, widen, or remove the managed OmniRoute provider in one place.
-    private func setOmni(enabled: Bool, maxFree: Bool) {
-        let existingToken = providers.first { $0.id == omniRouteProviderID }?.authToken
+    private func setOmni(enabled: Bool, maxFree: Bool, compression: String? = nil) {
+        let existing = providers.first { $0.id == omniRouteProviderID }
+        let token = existing?.authToken
+        let compress = compression ?? existing?.compression ?? "stacked"
         providers.removeAll { $0.id == omniRouteProviderID }
         if enabled {
-            providers.append(.omniRoute(maxFree: maxFree, authToken: existingToken))
+            providers.append(.omniRoute(maxFree: maxFree, authToken: token, compression: compress))
         }
         ProviderStore.save(providers)
     }

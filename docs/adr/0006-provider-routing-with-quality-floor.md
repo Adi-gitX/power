@@ -64,6 +64,15 @@ background health monitor respawns it if it dies while enabled, cleared by Stop.
 Pinned by an engine test where a gateway fails *every* dispatch and the run still
 reaches done through the floor.
 
+**Request compression (2026-08-27):** OmniRoute's token-compression is enabled
+per routed stage via Claude Code's `ANTHROPIC_CUSTOM_HEADERS` (verified real,
+Claude Code ≥ 2.1.227) carrying `x-omniroute-compression: <mode>`. The managed
+provider defaults to `stacked`; the UI offers Off / Standard / Max. It is safe on
+a coding run — OmniRoute compresses noisy tool output, never code, and its
+cache-aware pass self-downgrades for caching providers so it never breaks Power's
+warm-session reuse. The header rides `providerEnv`/`env(for:)`, so it only ever
+touches a gateway dispatch's environment, never Claude-direct stages.
+
 **Consequences:** the router, env hook, base-URL normalization, and compaction
 live in both engines (`apps/desktop/src/main/engine/providers.ts` and the
 `Provider`/`ProviderRouter` types in `apps/macos/Power/Models.swift`) and stay

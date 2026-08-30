@@ -59,6 +59,16 @@ export interface Provider {
    * the stage's normal model name is passed through and the gateway maps it.
    */
   models?: Partial<Record<Role, string>>;
+  /**
+   * OmniRoute request-compression mode, sent as the `x-omniroute-compression`
+   * header so the gateway trims the request before it reaches the upstream
+   * model. Values are OmniRoute's own: 'off', 'standard' (~30%), 'stacked'
+   * (RTK→Caveman, ~89% on tool output). Safe for a coding run — it compresses
+   * noisy tool output, never code, and OmniRoute's cache-aware pass downgrades
+   * itself for caching providers so it never breaks Power's warm-session reuse.
+   * Undefined/'off' sends no header. Only meaningful for a gateway.
+   */
+  compression?: string;
 }
 
 /** The built-in default: your Claude CLI login, trusted with every role, no env
@@ -108,7 +118,11 @@ const OMNIROUTE_MODELS: Record<Role, string> = {
  * trade-offs and all — while the default keeps the safe floor (research + docs).
  * costWeight 0: free wins the routing tie for the roles it is trusted with.
  */
-export function omniRouteProvider(maxFree = false, authToken?: string): Provider {
+export function omniRouteProvider(
+  maxFree = false,
+  authToken?: string,
+  compression = 'stacked',
+): Provider {
   return {
     id: OMNIROUTE_PROVIDER_ID,
     label: 'OmniRoute',
@@ -120,6 +134,7 @@ export function omniRouteProvider(maxFree = false, authToken?: string): Provider
       : [...SAFE_CHEAP_ROLES],
     costWeight: 0,
     models: OMNIROUTE_MODELS,
+    compression,
   };
 }
 
@@ -153,6 +168,13 @@ export function providerEnv(p: Provider): Record<string, string> {
   if (p.kind !== 'gateway' || !p.baseUrl) return {};
   const env: Record<string, string> = { ANTHROPIC_BASE_URL: normalizeBaseUrl(p.baseUrl) };
   if (p.authToken) env.ANTHROPIC_AUTH_TOKEN = p.authToken;
+  // Claude Code forwards ANTHROPIC_CUSTOM_HEADERS on every request to the base
+  // URL (format "Name: Value"), which is exactly how OmniRoute reads the
+  // per-request compression mode. This is what makes a routed stage send fewer
+  // tokens upstream.
+  if (p.compression && p.compression !== 'off') {
+    env.ANTHROPIC_CUSTOM_HEADERS = `x-omniroute-compression: ${p.compression}`;
+  }
   return env;
 }
 

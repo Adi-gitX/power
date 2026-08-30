@@ -159,11 +159,17 @@ struct Provider: Codable, Equatable, Identifiable {
     var costWeight: Int
     /// Optional per-role `--model` override the gateway wants.
     var models: [Role: String]?
+    /// OmniRoute request-compression mode, sent as the `x-omniroute-compression`
+    /// header so the gateway trims the request before the upstream model. Values:
+    /// "off", "standard", "stacked". Safe on a coding run — it compresses noisy
+    /// tool output, never code, and is cache-aware. nil/"off" sends no header.
+    var compression: String?
 
     /// The built-in default: your Claude login, trusted with every role.
     static let claudeDefault = Provider(
         id: "claude", label: "Claude (your login)", kind: .claudeCLI,
-        baseUrl: nil, authToken: nil, allowRoles: Role.allCases, costWeight: 10, models: nil
+        baseUrl: nil, authToken: nil, allowRoles: Role.allCases, costWeight: 10, models: nil,
+        compression: nil
     )
 }
 
@@ -186,12 +192,14 @@ extension Provider {
     /// The managed OmniRoute provider. `maxFree` widens the quality floor to
     /// every role — the "route everything free" choice — while the default keeps
     /// the safe floor (research + docs). costWeight 0 wins the routing tie.
-    static func omniRoute(maxFree: Bool = false, authToken: String? = nil) -> Provider {
+    static func omniRoute(
+        maxFree: Bool = false, authToken: String? = nil, compression: String? = "stacked"
+    ) -> Provider {
         Provider(
             id: omniRouteProviderID, label: "OmniRoute", kind: .gateway,
             baseUrl: omniRouteDefaultBase, authToken: authToken,
             allowRoles: maxFree ? Role.allCases : safeCheapRoles,
-            costWeight: 0, models: omniRouteModels
+            costWeight: 0, models: omniRouteModels, compression: compression
         )
     }
 }
@@ -217,6 +225,12 @@ enum ProviderRouter {
         guard p.kind == .gateway, let base = p.baseUrl else { return [:] }
         var env = ["ANTHROPIC_BASE_URL": normalizeBaseUrl(base)]
         if let token = p.authToken, !token.isEmpty { env["ANTHROPIC_AUTH_TOKEN"] = token }
+        // Claude Code forwards ANTHROPIC_CUSTOM_HEADERS on every request to the
+        // base URL ("Name: Value"), which is how OmniRoute reads the compression
+        // mode — the token-savings feature, applied per routed stage.
+        if let mode = p.compression, mode != "off", !mode.isEmpty {
+            env["ANTHROPIC_CUSTOM_HEADERS"] = "x-omniroute-compression: \(mode)"
+        }
         return env
     }
 

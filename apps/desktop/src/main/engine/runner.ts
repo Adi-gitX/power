@@ -195,9 +195,6 @@ export class PowerRun extends EventEmitter {
   /** Cost and turns attributed to each provider that served a stage — the
    * honest savings story: where the spend went, and how much left Anthropic. */
   private readonly costByProvider = new Map<string, { label: string; costUsd: number; turns: number }>();
-  /** The env overlay of the dispatch currently streaming, so its usage frame is
-   * attributed to the right provider. */
-  private activeProvider: Provider = CLAUDE_DEFAULT;
   /** The claude session of the most recent dispatch — what a retry resumes. */
   private lastAgentSession: string | null = null;
   /** Which provider produced that session — a resume never crosses providers. */
@@ -317,7 +314,6 @@ export class PowerRun extends EventEmitter {
     // provider produced it — a fallback across providers always goes cold,
     // because a session belongs to the endpoint that opened it.
     const execOn = async (provider: Provider): Promise<void> => {
-      this.activeProvider = provider;
       const useResume = !!resume && this.lastSessionProvider === provider.id;
       const dispatch = useResume ? compact.join('\n') : coldBrief;
       const modelOverride = provider.models?.[role];
@@ -632,18 +628,19 @@ export class PowerRun extends EventEmitter {
       this.stage('implement', 'pass');
 
       // ---- review + test (skippable, engine-side only) ----
+      // Sequential, not parallel: the engine tracks a single active child, so a
+      // parallel pair would let Stop kill only one and leave the other burning
+      // tokens. Sequential also keeps this identical to the Swift engine.
       if (this.features.reviewTest) {
         this.stage('review', 'start');
-        this.stage('test', 'start');
-        await Promise.all([
-          this.dispatch('reviewer', [
-            'Review the implementation against SPEC.md. Write review.json to the artifacts directory.',
-          ]),
-          this.dispatch('tester', [
-            'Run the test suite and exercise the spec’s criteria. Write test-report.json to the artifacts directory.',
-          ]),
+        await this.dispatch('reviewer', [
+          'Review the implementation against SPEC.md. Write review.json to the artifacts directory.',
         ]);
         this.stage('review', 'pass');
+        this.stage('test', 'start');
+        await this.dispatch('tester', [
+          'Run the test suite and exercise the spec’s criteria. Write test-report.json to the artifacts directory.',
+        ]);
         this.stage('test', 'pass');
       }
 
