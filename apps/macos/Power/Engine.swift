@@ -38,6 +38,8 @@ final class RunEngine: ObservableObject {
     /// The claude session of the most recent dispatch — what a retry resumes
     /// instead of re-sending a 20–40KB system prompt into a cold context.
     private var lastAgentSession: String?
+    /// Which provider produced that session — a resume never crosses providers.
+    private var lastSessionProvider: String?
     private var repoDir = ""
     private var goal = ""
     private var features = RunFeatures()
@@ -431,30 +433,19 @@ final class RunEngine: ObservableObject {
         // Route first: the cheapest provider trusted with this role. The Claude
         // default is always eligible, so a role no cheap provider is trusted
         // with stays on Claude — no behaviour change from before providers.
-        let provider = ProviderRouter.choose(role, from: providers)
-        if provider.id != Provider.claudeDefault.id {
-            appendLine("→ \(role.rawValue) routed to \(provider.label)", to: stage)
-        }
+        let chosen = ProviderRouter.choose(role, from: providers)
         // Conservative, lossless compaction — the safe half of token compression.
         let compact = ProviderRouter.compact(brief)
-        // A resumed dispatch talks to the session that already holds the role
-        // prompt, the repo context, and everything it read — so the brief is
-        // ONLY the fix. A cold dispatch carries the full identity.
-        let dispatchText: String
-        if resume != nil {
-            dispatchText = compact.joined(separator: "\n")
-        } else {
-            dispatchText = ([
-                "You are being dispatched as the \(role.rawValue) on a Power run.",
-                "",
-                "Repository (absolute path): \(repoDir)",
-                "Artifacts directory: \(repoDir)/.power/artifacts",
-                "",
-            ] + compact + [
-                "",
-                "Use absolute paths throughout. Write only the artifacts your role owns.",
-            ]).joined(separator: "\n")
-        }
+        let coldBrief = ([
+            "You are being dispatched as the \(role.rawValue) on a Power run.",
+            "",
+            "Repository (absolute path): \(repoDir)",
+            "Artifacts directory: \(repoDir)/.power/artifacts",
+            "",
+        ] + compact + [
+            "",
+            "Use absolute paths throughout. Write only the artifacts your role owns.",
+        ]).joined(separator: "\n")
 
         // Test parity with the Electron engine: POWER_MOCK_AGENTS swaps the
         // model for fixture-writing mocks, so the full pipeline — real state
@@ -468,38 +459,60 @@ final class RunEngine: ObservableObject {
             return
         }
 
-        var args = ["-p", dispatchText]
-        if let resume {
-            // No system prompt resend: the session already has it, and the
-            // provider's cache already holds the context. A fix needs few
-            // turns; cap it tighter than a fresh stage.
-            args += ["--resume", resume, "--max-turns", String(max(10, maxTurns(for: role) / 3))]
-        } else {
-            let promptURL = powerRoot.appendingPathComponent("agents/\(role.rawValue).md")
-            let systemPrompt = try String(contentsOf: promptURL, encoding: .utf8)
+        // One attempt against one provider. A resume id only survives if the
+        // SAME provider produced it — a fallback across providers goes cold,
+        // because a session belongs to the endpoint that opened it.
+        func execOn(_ provider: Provider) async throws {
+            let useResume = (resume != nil) && (lastSessionProvider == provider.id)
+            var args = ["-p", useResume ? compact.joined(separator: "\n") : coldBrief]
+            if useResume, let resume {
+                args += ["--resume", resume, "--max-turns", String(max(10, maxTurns(for: role) / 3))]
+            } else {
+                let promptURL = powerRoot.appendingPathComponent("agents/\(role.rawValue).md")
+                let systemPrompt = try String(contentsOf: promptURL, encoding: .utf8)
+                args += ["--append-system-prompt", systemPrompt, "--max-turns", String(maxTurns(for: role))]
+            }
+            let resolvedModel = provider.models?[role] ?? model(for: role)
             args += [
-                "--append-system-prompt", systemPrompt,
-                "--max-turns", String(maxTurns(for: role)),
+                "--permission-mode", "acceptEdits",
+                "--add-dir", repoDir,
+                "--model", resolvedModel,
+                "--output-format", "stream-json",
+                "--verbose",
             ]
+            lastAgentSession = nil
+            // A gateway redirects this one dispatch by overlaying the two Claude
+            // Code env vars — never mutating the app's environment.
+            _ = try await exec("claude", args, env: ProviderRouter.env(for: provider)) { [weak self] line in
+                self?.consumeStreamLine(line, role: role, stage: stage, provider: provider)
+            }
         }
-        // A gateway may name the model it fronts; otherwise the stage's normal
-        // model name is passed through for the gateway to map.
-        let resolvedModel = provider.models?[role] ?? model(for: role)
-        args += [
-            "--permission-mode", "acceptEdits",
-            "--add-dir", repoDir,
-            "--model", resolvedModel,
-            // stream-json is what makes cost visible: assistant frames carry
-            // the card's text, the result frame carries cost and turns.
-            "--output-format", "stream-json",
-            "--verbose",
-        ]
 
-        lastAgentSession = nil
-        // A gateway redirects this one dispatch by overlaying the two Claude
-        // Code env vars — never mutating the app's environment.
-        _ = try await exec("claude", args, env: ProviderRouter.env(for: provider)) { [weak self] line in
-            self?.consumeStreamLine(line, role: role, stage: stage, provider: provider)
+        // The "never stops" guarantee, in two layers:
+        //  1. Preflight — an unreachable gateway degrades to your Claude login
+        //     BEFORE a dispatch is spent on a dead endpoint.
+        //  2. On error — a gateway dispatch that fails anyway falls back to
+        //     Claude once. A flaky free provider costs a reroute, never the run.
+        // Claude is the floor: it has no fallback, and its failure is real.
+        var provider = chosen
+        if provider.kind == .gateway {
+            let reachable = await ProviderStore.detect(provider.baseUrl ?? omniRouteDefaultBase)
+            if !reachable {
+                appendLine("⚠︎ \(provider.label) unreachable — falling back to your Claude login", to: stage)
+                provider = .claudeDefault
+            }
+        }
+        if provider.id != Provider.claudeDefault.id {
+            appendLine("→ \(role.rawValue) routed to \(provider.label)", to: stage)
+        }
+
+        do {
+            try await execOn(provider)
+        } catch {
+            if stopped { throw error }                          // a user Stop is not a provider fault
+            if provider.id == Provider.claudeDefault.id { throw error }  // the floor failing is real
+            appendLine("⚠︎ \(provider.label) failed this stage — retrying on your Claude login", to: stage)
+            try await execOn(.claudeDefault)
         }
     }
 
@@ -515,7 +528,10 @@ final class RunEngine: ObservableObject {
         }
         switch frame["type"] as? String {
         case "system":
-            if let sid = frame["session_id"] as? String { lastAgentSession = sid }
+            if let sid = frame["session_id"] as? String {
+                lastAgentSession = sid
+                lastSessionProvider = provider.id
+            }
         case "assistant":
             if let message = frame["message"] as? [String: Any],
                let content = message["content"] as? [[String: Any]] {
@@ -542,7 +558,10 @@ final class RunEngine: ObservableObject {
                 turns: (priorP?.turns ?? 0) + turns,
                 model: provider.label
             )
-            if let sid = frame["session_id"] as? String { lastAgentSession = sid }
+            if let sid = frame["session_id"] as? String {
+                lastAgentSession = sid
+                lastSessionProvider = provider.id
+            }
         default:
             break // tool-use noise never reaches the card
         }

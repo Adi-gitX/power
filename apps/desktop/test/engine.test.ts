@@ -245,3 +245,67 @@ describe('efficiency contract', () => {
     expect(usage).toMatchObject({ kind: 'usage', sessionId: 'abc' });
   });
 });
+
+describe('the never-stops guarantee (provider fallback)', () => {
+  it(
+    'a gateway that fails EVERY dispatch still reaches done via the Claude floor',
+    { timeout: 120_000 },
+    async () => {
+      const repoDir = scratchRepo();
+      const events: RunEvent[] = [];
+      // Each role: the first dispatch (the gateway) fails; the fallback to the
+      // Claude default runs the real mock. So every stage survives a dead
+      // provider without the run ever stopping.
+      const calls = new Map<string, number>();
+
+      const run = new PowerRun({
+        repoDir,
+        goal: 'a CLI that converts CSV to JSON, with tests',
+        powerRoot: POWER_ROOT,
+        // A gateway trusted with every role — the "maximum free" shape.
+        providers: [
+          {
+            id: 'omniroute',
+            label: 'OmniRoute',
+            kind: 'gateway',
+            baseUrl: 'http://127.0.0.1:20128',
+            allowRoles: [
+              'researcher',
+              'architect',
+              'implementer',
+              'reviewer',
+              'tester',
+              'verifier',
+              'documenter',
+            ],
+            costWeight: 0,
+          },
+        ] as never,
+        agentCommand: (role) => {
+          const n = (calls.get(role) ?? 0) + 1;
+          calls.set(role, n);
+          // First call for a role = the gateway attempt → fail hard.
+          if (n === 1) return { cmd: 'node', args: ['-e', 'process.exit(1)'] };
+          // Second call = the Claude fallback → the real fixture mock.
+          return { cmd: 'node', args: [MOCK, role, repoDir, FIXTURES] };
+        },
+      });
+      run.on('event', (e: RunEvent) => {
+        events.push(e);
+        if (e.type === 'needs_approval') run.approve();
+      });
+
+      await run.run();
+
+      // It finished, and every gate passed on the fallback's artifacts.
+      expect(events.some((e) => e.type === 'done')).toBe(true);
+      expect(events.filter((e) => e.type === 'gate').every((g) => g.pass)).toBe(true);
+      // The fallback was visible, not silent.
+      expect(
+        events.some((e) => e.type === 'agent' && /retrying on your Claude login/.test(e.line)),
+      ).toBe(true);
+      // Every role really did fall back (2 calls: gateway fail + Claude mock).
+      for (const [, n] of calls) expect(n).toBe(2);
+    },
+  );
+});

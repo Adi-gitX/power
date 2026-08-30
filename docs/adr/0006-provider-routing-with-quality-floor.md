@@ -51,6 +51,19 @@ trade-off stated inline, and it is the user's explicit choice, never the shipped
 default. `Provider.omniRoute(maxFree:)` / `omniRouteProvider(maxFree)` is the
 single factory both engines build it from.
 
+**Never-stops fallback (2026-08-27):** routing must never make a run *less*
+reliable than not routing. So the dispatch degrades gracefully in two layers:
+(1) preflight — an unreachable gateway falls back to the Claude default before a
+dispatch is spent on a dead endpoint; (2) on error — a gateway dispatch that
+fails anyway retries once on the Claude default. Claude is the floor and has no
+fallback: its failure is a real failure the gate's retry loop must see, and a
+user Stop is never treated as a provider fault. A resume id never crosses
+providers (a session belongs to the endpoint that opened it), so a fallback
+always goes cold. The managed OmniRoute additionally self-supervises — a
+background health monitor respawns it if it dies while enabled, cleared by Stop.
+Pinned by an engine test where a gateway fails *every* dispatch and the run still
+reaches done through the floor.
+
 **Consequences:** the router, env hook, base-URL normalization, and compaction
 live in both engines (`apps/desktop/src/main/engine/providers.ts` and the
 `Provider`/`ProviderRouter` types in `apps/macos/Power/Models.swift`) and stay

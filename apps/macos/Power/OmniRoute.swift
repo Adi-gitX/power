@@ -24,6 +24,10 @@ final class OmniRouteManager: ObservableObject {
 
     private static let healthPath = "/api/health/ping"
     private var server: Process?
+    /// While true, a background monitor keeps the server alive — if it dies
+    /// unexpectedly it is respawned. A user Stop clears it so Stop means stop.
+    private var supervise = false
+    private var monitor: Task<Void, Never>?
 
     // MARK: Status
 
@@ -86,11 +90,29 @@ final class OmniRouteManager: ObservableObject {
         do { try p.run() } catch { state = .error("Could not launch omniroute."); return false }
         server = p
         for _ in 0..<(seconds * 2) {
-            if await ping() { state = .running; return true }
+            if await ping() { state = .running; startMonitor(); return true }
             try? await Task.sleep(nanoseconds: 500_000_000)
         }
         state = .error("Did not answer health check in time.")
         return false
+    }
+
+    /// Keep the server alive while supervised: poll health, respawn on an
+    /// unexpected death. Cheap (a ping every 15s) and self-cancelling on Stop.
+    private func startMonitor() {
+        supervise = true
+        monitor?.cancel()
+        monitor = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                guard let self, self.supervise else { return }
+                if await self.ping() { continue }
+                if !self.supervise { return }
+                // Died while we still wanted it up — bring it back.
+                _ = await self.start()
+                return // start() installs a fresh monitor
+            }
+        }
     }
 
     /// The engine's preflight: ensure the server is up before a routed run.
@@ -101,6 +123,9 @@ final class OmniRouteManager: ObservableObject {
     }
 
     func stop() {
+        supervise = false
+        monitor?.cancel()
+        monitor = nil
         server?.terminate()
         server = nil
         state = .stopped

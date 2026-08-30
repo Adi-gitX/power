@@ -29,6 +29,7 @@ import {
   CLAUDE_DEFAULT,
   chooseProvider,
   compactBrief,
+  detectGateway,
   providerEnv,
   type Provider,
 } from './providers.js';
@@ -199,6 +200,8 @@ export class PowerRun extends EventEmitter {
   private activeProvider: Provider = CLAUDE_DEFAULT;
   /** The claude session of the most recent dispatch — what a retry resumes. */
   private lastAgentSession: string | null = null;
+  /** Which provider produced that session — a resume never crosses providers. */
+  private lastSessionProvider: string | null = null;
 
   constructor(private readonly opts: EngineOptions) {
     super();
@@ -296,86 +299,124 @@ export class PowerRun extends EventEmitter {
     // Route first: the cheapest provider trusted with this role. The built-in
     // Claude default is always eligible, so a role no cheap provider is trusted
     // with simply stays on Claude — no behaviour change from before providers.
-    const provider = chooseProvider(role, this.providers);
-    this.activeProvider = provider;
+    const chosen = chooseProvider(role, this.providers);
+    // Conservative, lossless compaction — the safe half of token compression.
+    const { lines: compact } = compactBrief(briefLines);
+    const coldBrief = [
+      `You are being dispatched as the ${role} on a Power run.`,
+      '',
+      `Repository (absolute path): ${this.opts.repoDir}`,
+      `Artifacts directory: ${join(this.opts.repoDir, '.power', 'artifacts')}`,
+      '',
+      ...compact,
+      '',
+      'Use absolute paths throughout. Write only the artifacts your role owns.',
+    ].join('\n');
+
+    // One attempt against one provider. A resume id only survives if the SAME
+    // provider produced it — a fallback across providers always goes cold,
+    // because a session belongs to the endpoint that opened it.
+    const execOn = async (provider: Provider): Promise<void> => {
+      this.activeProvider = provider;
+      const useResume = !!resume && this.lastSessionProvider === provider.id;
+      const dispatch = useResume ? compact.join('\n') : coldBrief;
+      const modelOverride = provider.models?.[role];
+      const command = this.opts.agentCommand
+        ? this.opts.agentCommand(role, dispatch)
+        : {
+            cmd: 'claude',
+            args: claudeArgs(
+              role,
+              dispatch,
+              useResume ? '' : readFileSync(promptPath, 'utf8'),
+              this.opts.repoDir,
+              this.features,
+              this.opts.goal,
+              useResume ? resume : undefined,
+              modelOverride,
+            ),
+          };
+      this.lastAgentSession = null;
+      await this.exec(
+        command.cmd,
+        command.args,
+        (line) => {
+          const parsed = parseStreamLine(line);
+          if (parsed.kind === 'session') {
+            this.lastAgentSession = parsed.sessionId;
+            this.lastSessionProvider = provider.id;
+          } else if (parsed.kind === 'text') {
+            for (const part of parsed.text.split('\n')) {
+              if (part.trim()) this.emitEvent({ type: 'agent', role, line: part });
+            }
+          } else if (parsed.kind === 'raw') {
+            this.emitEvent({ type: 'agent', role, line: parsed.line });
+          } else if (parsed.kind === 'usage') {
+            if (parsed.sessionId) {
+              this.lastAgentSession = parsed.sessionId;
+              this.lastSessionProvider = provider.id;
+            }
+            this.totalCostUsd += parsed.costUsd;
+            const acc = this.costByProvider.get(provider.id) ?? {
+              label: provider.label,
+              costUsd: 0,
+              turns: 0,
+            };
+            acc.costUsd += parsed.costUsd;
+            acc.turns += parsed.turns;
+            this.costByProvider.set(provider.id, acc);
+            this.emitEvent({ type: 'agent_usage', role, costUsd: parsed.costUsd, turns: parsed.turns });
+            this.emitEvent({
+              type: 'run_usage',
+              costUsd: this.totalCostUsd,
+              byProvider: [...this.costByProvider.entries()].map(([id, v]) => ({
+                providerId: id,
+                label: v.label,
+                costUsd: v.costUsd,
+                turns: v.turns,
+              })),
+            });
+          }
+        },
+        providerEnv(provider),
+      );
+    };
+
+    // The "never stops" guarantee, in two layers:
+    //  1. Preflight — if the chosen gateway is unreachable, degrade to your
+    //     Claude login BEFORE spending a dispatch on a dead endpoint.
+    //  2. On error — if a gateway dispatch fails anyway, fall back to Claude
+    //     once. A flaky free provider costs you a reroute, never the run.
+    // Claude itself has no fallback: it is the floor, and its failure is a real
+    // failure the gate's retry loop should see.
+    let provider = chosen;
+    if (provider.kind === 'gateway' && !this.opts.agentCommand) {
+      const reachable = await detectGateway(provider.baseUrl);
+      if (!reachable) {
+        this.emitEvent({
+          type: 'agent',
+          role,
+          line: `⚠︎ ${provider.label} unreachable — falling back to your Claude login`,
+        });
+        provider = CLAUDE_DEFAULT;
+      }
+    }
     if (provider.id !== CLAUDE_DEFAULT.id) {
       this.emitEvent({ type: 'route', role, providerId: provider.id, providerLabel: provider.label });
     }
-    // Conservative, lossless compaction — the safe half of token compression.
-    const { lines: compact } = compactBrief(briefLines);
-    // A resumed dispatch talks to the warm session: the brief IS the payload.
-    const dispatch = resume
-      ? compact.join('\n')
-      : [
-          `You are being dispatched as the ${role} on a Power run.`,
-          '',
-          `Repository (absolute path): ${this.opts.repoDir}`,
-          `Artifacts directory: ${join(this.opts.repoDir, '.power', 'artifacts')}`,
-          '',
-          ...compact,
-          '',
-          'Use absolute paths throughout. Write only the artifacts your role owns.',
-        ].join('\n');
 
-    // A gateway may name the model it fronts; otherwise the stage's normal
-    // model name is passed through for the gateway to map.
-    const modelOverride = provider.models?.[role];
-    const command = this.opts.agentCommand
-      ? this.opts.agentCommand(role, dispatch)
-      : {
-          cmd: 'claude',
-          args: claudeArgs(
-            role,
-            dispatch,
-            resume ? '' : readFileSync(promptPath, 'utf8'),
-            this.opts.repoDir,
-            this.features,
-            this.opts.goal,
-            resume,
-            modelOverride,
-          ),
-        };
-
-    this.lastAgentSession = null;
-    await this.exec(
-      command.cmd,
-      command.args,
-      (line) => {
-        const parsed = parseStreamLine(line);
-        if (parsed.kind === 'session') {
-          this.lastAgentSession = parsed.sessionId;
-        } else if (parsed.kind === 'text') {
-          for (const part of parsed.text.split('\n')) {
-            if (part.trim()) this.emitEvent({ type: 'agent', role, line: part });
-          }
-        } else if (parsed.kind === 'raw') {
-          this.emitEvent({ type: 'agent', role, line: parsed.line });
-        } else if (parsed.kind === 'usage') {
-          if (parsed.sessionId) this.lastAgentSession = parsed.sessionId;
-          this.totalCostUsd += parsed.costUsd;
-          const acc = this.costByProvider.get(provider.id) ?? {
-            label: provider.label,
-            costUsd: 0,
-            turns: 0,
-          };
-          acc.costUsd += parsed.costUsd;
-          acc.turns += parsed.turns;
-          this.costByProvider.set(provider.id, acc);
-          this.emitEvent({ type: 'agent_usage', role, costUsd: parsed.costUsd, turns: parsed.turns });
-          this.emitEvent({
-            type: 'run_usage',
-            costUsd: this.totalCostUsd,
-            byProvider: [...this.costByProvider.entries()].map(([id, v]) => ({
-              providerId: id,
-              label: v.label,
-              costUsd: v.costUsd,
-              turns: v.turns,
-            })),
-          });
-        }
-      },
-      providerEnv(provider),
-    );
+    try {
+      await execOn(provider);
+    } catch (error) {
+      if (this.stopped) throw error; // a user Stop is not a provider fault
+      if (provider.id === CLAUDE_DEFAULT.id) throw error; // the floor failing is real
+      this.emitEvent({
+        type: 'agent',
+        role,
+        line: `⚠︎ ${provider.label} failed this stage — retrying on your Claude login`,
+      });
+      await execOn(CLAUDE_DEFAULT);
+    }
   }
 
   /**
