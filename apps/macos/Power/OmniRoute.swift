@@ -69,11 +69,26 @@ final class OmniRouteManager: ObservableObject {
     /// `npm install -g omniroute`, streaming its output into the sheet.
     func install() async {
         state = .installing; installLog = []
-        let ok = await runStreaming("npm", ["install", "-g", "omniroute"]) { [weak self] line in
+        _ = await runStreaming("npm", ["install", "-g", "omniroute", "--no-fund", "--no-audit"]) { [weak self] line in
             self?.installLog.append(line)
             if self?.installLog.count ?? 0 > 200 { self?.installLog.removeFirst() }
         }
-        if ok { await refresh() } else { state = .error("Install failed — see the log.") }
+        // Trust the binary, not npm's exit code: npm exits non-zero on peer
+        // warnings while still installing fine, so the honest test is whether
+        // the CLI is actually on PATH now.
+        if await isInstalled() { await refresh(); return }
+        // Failed — surface the ACTUAL reason from the log, not a generic line.
+        let log = installLog.joined(separator: "\n").lowercased()
+        if log.contains("enospc") || log.contains("no space left") {
+            state = .error("Not enough disk space to install OmniRoute (~100 MB needed). Free up space and try again.")
+        } else if log.contains("eacces") || log.contains("permission denied") {
+            state = .error("npm couldn't write the global install (permission denied). See the log.")
+        } else if log.contains("etimedout") || log.contains("network") || log.contains("enotfound") {
+            state = .error("Network error while installing. Check your connection and retry.")
+        } else {
+            let lastErr = installLog.last { $0.lowercased().contains("error") } ?? installLog.last ?? "unknown"
+            state = .error("Install failed: \(lastErr)")
+        }
     }
 
     /// Guards against two near-simultaneous start()s (a pre-run ensureRunning

@@ -2581,6 +2581,14 @@ struct RoutingSheet: View {
         providers.first { $0.id == omniRouteProviderID }?.compression ?? "stacked"
     }
 
+    /// Show the install log while installing and after a failure.
+    private var omniShowLog: Bool {
+        guard !omni.installLog.isEmpty else { return false }
+        if omni.state == .installing { return true }
+        if case .error = omni.state { return true }
+        return false
+    }
+
     private var omniRouteCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
@@ -2601,22 +2609,25 @@ struct RoutingSheet: View {
 
             omniActions
 
-            if omni.state == .installing, !omni.installLog.isEmpty {
+            // Show the log while installing AND after a failure — "see the log"
+            // has to actually show it.
+            if omniShowLog {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 1) {
-                        ForEach(Array(omni.installLog.suffix(6).enumerated()), id: \.offset) { _, l in
+                        ForEach(Array(omni.installLog.suffix(8).enumerated()), id: \.offset) { _, l in
                             Text(l).font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(Color.mutedText).lineLimit(1)
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(height: 80)
+                .frame(height: 88)
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.raised))
             }
 
             if case .error(let msg) = omni.state {
                 Text(msg).font(.system(size: 11)).foregroundStyle(Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Divider().overlay(Color.hairline)
