@@ -772,39 +772,50 @@ struct ContentView: View {
         }
     }
 
-    /// Every chip maps to something the engine honestly does.
+    /// Every chip maps to something the engine honestly does. Two rows so the
+    /// controls breathe: the two selectors on top, the stage toggles below.
     private var optionsRow: some View {
-        HStack(spacing: 6) {
-            // Tier selector with animated indicator
-            HStack(spacing: 0) {
-                ForEach(RunFeatures.Tier.allCases, id: \.self) { tier in
-                    Button(tier.rawValue) {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            features.tier = tier
-                            features.save()
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11.5, weight: features.tier == tier ? .semibold : .medium))
-                    .foregroundStyle(features.tier == tier ? Color.ink : Color.mutedText)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(features.tier == tier ? Color.raised : .clear)
-                    )
-                    .animation(.spring(response: 0.3), value: features.tier)
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.hairline))
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                // The money choice, first: Paid / Mixed / Free.
+                costModeControl
 
-            toggleChip("Research", \.research)
-            toggleChip("Review + Test", \.reviewTest)
-            toggleChip("Docs", \.docs)
-            toggleChip("Auto-approve", \.autoApprove)
-            toggleChip("Packs", \.packs)
-            routingChip
-            Spacer(minLength: 0)
+                // Model tier selector with animated indicator.
+                HStack(spacing: 0) {
+                    ForEach(RunFeatures.Tier.allCases, id: \.self) { tier in
+                        Button(tier.rawValue) {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                features.tier = tier
+                                features.save()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .lineLimit(1).fixedSize()
+                        .font(.system(size: 11.5, weight: features.tier == tier ? .semibold : .medium))
+                        .foregroundStyle(features.tier == tier ? Color.ink : Color.mutedText)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(features.tier == tier ? Color.raised : .clear)
+                        )
+                        .animation(.spring(response: 0.3), value: features.tier)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.hairline))
+
+                routingChip
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 6) {
+                toggleChip("Research", \.research)
+                toggleChip("Review + Test", \.reviewTest)
+                toggleChip("Docs", \.docs)
+                toggleChip("Auto-approve", \.autoApprove)
+                toggleChip("Packs", \.packs)
+                Spacer(minLength: 0)
+            }
         }
     }
 
@@ -814,6 +825,62 @@ struct ContentView: View {
             .filter { $0.key != Provider.claudeDefault.id }
             .reduce(0) { $0 + $1.value.turns }
         return sum > 0 ? sum : nil
+    }
+
+    /// The up-front money choice. Paid = your Claude login only. Free =
+    /// everything through OmniRoute (falling back to Claude if it's down).
+    /// Mixed = free for the safe roles, paid Claude for code and gates.
+    enum CostMode: String, CaseIterable { case paid = "Paid", mixed = "Mixed", free = "Free" }
+
+    private var costMode: CostMode {
+        guard let omni = providers.first(where: { $0.id == omniRouteProviderID }),
+              !omni.allowRoles.isEmpty else { return .paid }
+        return omni.allowRoles.count >= Role.allCases.count ? .free : .mixed
+    }
+
+    /// Apply a money choice by (re)configuring the managed OmniRoute provider,
+    /// preserving the token and compression the user already set. Choosing a
+    /// routed mode while OmniRoute isn't up opens Routing so it can be set up.
+    private func setCostMode(_ mode: CostMode) {
+        let existing = providers.first { $0.id == omniRouteProviderID }
+        let token = existing?.authToken
+        let compress = existing?.compression ?? "stacked"
+        providers.removeAll { $0.id == omniRouteProviderID }
+        switch mode {
+        case .paid: break
+        case .mixed: providers.append(.omniRoute(maxFree: false, authToken: token, compression: compress))
+        case .free: providers.append(.omniRoute(maxFree: true, authToken: token, compression: compress))
+        }
+        ProviderStore.save(providers)
+        if mode != .paid {
+            Task { if !(await omni.ping()) { showRouting = true } }
+        }
+    }
+
+    /// The Paid / Mixed / Free selector — the headline money control, first in
+    /// the options row.
+    private var costModeControl: some View {
+        HStack(spacing: 0) {
+            ForEach(CostMode.allCases, id: \.self) { mode in
+                let on = costMode == mode
+                Button(mode.rawValue) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { setCostMode(mode) }
+                }
+                .buttonStyle(.plain)
+                .lineLimit(1).fixedSize()
+                .font(.system(size: 11.5, weight: on ? .semibold : .medium))
+                .foregroundStyle(on ? (mode == .free ? Color.green : Color.ink) : Color.mutedText)
+                .padding(.horizontal, 11).padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(on ? (mode == .free ? Color.green.opacity(0.15) : Color.raised) : .clear)
+                )
+                .animation(.spring(response: 0.3), value: costMode)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.hairline))
+        .help("Paid: your Claude login. Mixed: free research + docs, paid Claude for code. Free: everything free via OmniRoute, falling back to Claude if it's down.")
     }
 
     /// The routing affordance: opens the provider sheet. Shows a count when the
@@ -829,6 +896,7 @@ struct ContentView: View {
             }
         }
         .buttonStyle(.plain)
+        .lineLimit(1).fixedSize()
         .font(.system(size: 11.5, weight: routed ? .semibold : .medium))
         .foregroundStyle(routed ? Color.accentSoft : Color.mutedText)
         .padding(.horizontal, 10).padding(.vertical, 5)
@@ -846,6 +914,7 @@ struct ContentView: View {
             }
         }
         .buttonStyle(.plain)
+        .lineLimit(1).fixedSize()
         .font(.system(size: 11.5, weight: on ? .semibold : .medium))
         .foregroundStyle(on ? Color.accentSoft : Color.mutedText)
         .padding(.horizontal, 10).padding(.vertical, 5)
