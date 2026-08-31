@@ -5,6 +5,7 @@
     { "path": "./packages/gates" },
     { "path": "./packages/core" },
     { "path": "./packages/knowledge" },
+    { "path": "./packages/relay" },
     { "path": "./apps/orchestrator" }
   ]
 }
