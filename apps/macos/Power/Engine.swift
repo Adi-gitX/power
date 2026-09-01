@@ -496,7 +496,7 @@ final class RunEngine: ObservableObject {
         // Claude is the floor: it has no fallback, and its failure is real.
         var provider = chosen
         if provider.kind == .gateway {
-            let reachable = await ProviderStore.detect(provider.baseUrl ?? omniRouteDefaultBase)
+            let reachable = await ProviderStore.detect(provider.baseUrl ?? relayDefaultBase)
             if !reachable {
                 appendLine("⚠︎ \(provider.label) unreachable — falling back to your Claude login", to: stage)
                 provider = .claudeDefault

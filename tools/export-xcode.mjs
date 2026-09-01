@@ -52,7 +52,11 @@ function bundle(entry, outfile) {
 }
 
 function main() {
-  for (const prereq of ['packages/core/dist/cli.js', 'packages/gates/dist/cli.js']) {
+  for (const prereq of [
+    'packages/core/dist/cli.js',
+    'packages/gates/dist/cli.js',
+    'packages/relay/dist/cli.js',
+  ]) {
     if (!existsSync(join(ROOT, prereq))) {
       throw new Error(`${prereq} missing — run \`pnpm typecheck\` first to build dists`);
     }
@@ -65,7 +69,10 @@ function main() {
   bundle('packages/core/dist/cli.js', join(rt, 'packages/core/dist/cli.js'));
   bundle('packages/gates/dist/cli.js', join(rt, 'packages/gates/dist/cli.js'));
   bundle('packages/knowledge/dist/cli.js', join(rt, 'packages/knowledge/dist/cli.js'));
-  for (const pkg of ['core', 'gates', 'knowledge']) {
+  // Relay — Power's own inference router, shipped in the runtime so it needs no
+  // install (spawned via node like the others).
+  bundle('packages/relay/dist/cli.js', join(rt, 'packages/relay/dist/cli.js'));
+  for (const pkg of ['core', 'gates', 'knowledge', 'relay']) {
     writeFileSync(join(rt, 'packages', pkg, 'package.json'), '{"type":"module"}\n');
   }
 

@@ -173,33 +173,33 @@ struct Provider: Codable, Equatable, Identifiable {
     )
 }
 
-/// OmniRoute's documented default port. Detection probes here; any other
-/// Anthropic-compatible endpoint works just as well.
-let omniRouteDefaultBase = "http://127.0.0.1:20128"
+/// Relay's loopback port and base URL — Power's own inference router, first
+/// party and bundled in the runtime (packages/relay). Not OmniRoute's 20128.
+let relayPort = 20199
+let relayDefaultBase = "http://127.0.0.1:20199"
 
-/// The reserved id of the managed OmniRoute provider Power provisions itself.
-let omniRouteProviderID = "omniroute"
+/// The reserved id of the Relay provider Power provisions itself.
+let relayProviderID = "relay"
 
 extension Provider {
-    /// OmniRoute's smart model aliases per role: code and gate roles ask for its
-    /// coding-tuned combo, research/docs take the cheaper routes.
-    static let omniRouteModels: [Role: String] = [
-        .researcher: "auto", .documenter: "auto/cheap",
-        .architect: "auto/coding", .implementer: "auto/coding",
-        .reviewer: "auto/coding", .tester: "auto/coding", .verifier: "auto/coding",
+    /// Relay's model aliases per role. Relay maps these to real upstream models
+    /// from its config; code and gate roles ask for the coding-tuned route.
+    static let relayModels: [Role: String] = [
+        .researcher: "relay/cheap", .documenter: "relay/cheap",
+        .architect: "relay/coding", .implementer: "relay/coding",
+        .reviewer: "relay/coding", .tester: "relay/coding", .verifier: "relay/coding",
     ]
 
-    /// The managed OmniRoute provider. `maxFree` widens the quality floor to
-    /// every role — the "route everything free" choice — while the default keeps
-    /// the safe floor (research + docs). costWeight 0 wins the routing tie.
-    static func omniRoute(
-        maxFree: Bool = false, authToken: String? = nil, compression: String? = "stacked"
-    ) -> Provider {
+    /// The Relay provider. `maxFree` widens the quality floor to every role — the
+    /// "route everything through Relay" choice — while the default keeps the safe
+    /// floor (research + docs). Compression is configured in RelayStore (the
+    /// server does it), not sent as a header. costWeight 0 wins the routing tie.
+    static func relay(maxFree: Bool = false) -> Provider {
         Provider(
-            id: omniRouteProviderID, label: "OmniRoute", kind: .gateway,
-            baseUrl: omniRouteDefaultBase, authToken: authToken,
+            id: relayProviderID, label: "Relay", kind: .gateway,
+            baseUrl: relayDefaultBase, authToken: nil,
             allowRoles: maxFree ? Role.allCases : safeCheapRoles,
-            costWeight: 0, models: omniRouteModels, compression: compression
+            costWeight: 0, models: relayModels, compression: nil
         )
     }
 }
@@ -287,9 +287,9 @@ enum ProviderStore {
     }
 
     /// Probe a gateway to see if something is actually listening — used to offer
-    /// a running OmniRoute without the user knowing its port. Any HTTP response
-    /// (even 401/404) proves reachability.
-    static func detect(_ base: String = omniRouteDefaultBase, timeout: TimeInterval = 0.8) async -> Bool {
+    /// a running external gateway without the user knowing its port. Any HTTP
+    /// response (even 401/404) proves reachability.
+    static func detect(_ base: String = relayDefaultBase, timeout: TimeInterval = 0.8) async -> Bool {
         guard let url = URL(string: ProviderRouter.normalizeBaseUrl(base)) else { return false }
         var req = URLRequest(url: url)
         req.timeoutInterval = timeout
@@ -303,8 +303,71 @@ enum ProviderStore {
     }
 }
 
+/// Relay's upstream providers, persisted, and the config file Relay reads. This
+/// is the bring-your-own-keys layer: each upstream is an OpenAI-compatible (or
+/// Anthropic passthrough) endpoint with a key and a model map. Keys live here,
+/// app-private, never in git.
+struct RelayUpstream: Codable, Equatable, Identifiable {
+    var id: String
+    var name: String
+    var kind: String            // "openai" | "passthrough"
+    var baseUrl: String
+    var apiKey: String
+    var models: [String: String]  // alias -> upstream model id
+}
+
+enum RelayStore {
+    private static let providersKey = "power.relay.upstreams"
+    private static let compressionKey = "power.relay.compression"
+    private static let defaultKey = "power.relay.default"
+
+    static var configPath: URL { PowerPaths.relayConfigPath }
+
+    static func loadUpstreams() -> [RelayUpstream] {
+        guard let data = UserDefaults.standard.data(forKey: providersKey),
+              let list = try? JSONDecoder().decode([RelayUpstream].self, from: data)
+        else { return [] }
+        return list
+    }
+
+    static func saveUpstreams(_ ups: [RelayUpstream]) {
+        if let data = try? JSONEncoder().encode(ups) {
+            UserDefaults.standard.set(data, forKey: providersKey)
+        }
+        writeConfig()
+        NotificationCenter.default.post(name: .powerRelayChanged, object: nil)
+    }
+
+    static var compression: String {
+        get { UserDefaults.standard.string(forKey: compressionKey) ?? "safe" }
+        set { UserDefaults.standard.set(newValue, forKey: compressionKey); writeConfig() }
+    }
+
+    static var defaultUpstream: String? {
+        get { UserDefaults.standard.string(forKey: defaultKey) }
+        set { UserDefaults.standard.set(newValue, forKey: defaultKey); writeConfig() }
+    }
+
+    /// Serialize the current settings to `relay.config.json` in Relay's shape.
+    static func writeConfig() {
+        let ups = loadUpstreams()
+        let providers: [[String: Any]] = ups.map {
+            [
+                "id": $0.id, "name": $0.name, "kind": $0.kind,
+                "baseUrl": $0.baseUrl, "apiKey": $0.apiKey, "models": $0.models,
+            ]
+        }
+        var config: [String: Any] = ["providers": providers, "compression": compression]
+        if let def = defaultUpstream ?? ups.first?.id { config["defaultProvider"] = def }
+        if let data = try? JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted]) {
+            try? data.write(to: configPath)
+        }
+    }
+}
+
 extension Notification.Name {
     static let powerProvidersChanged = Notification.Name("powerProvidersChanged")
+    static let powerRelayChanged = Notification.Name("powerRelayChanged")
 }
 
 // MARK: - Run snapshots (persist full timeline for session restore)
@@ -564,6 +627,21 @@ enum PowerPaths {
         let inherited = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return "\(inherited):/opt/homebrew/bin:/usr/local/bin:\(home)/.local/bin"
+    }
+
+    /// The app-private base, `~/Library/Application Support/Power`. The session,
+    /// history, and snapshot stores all derive their paths from here; this is
+    /// the one helper for it, created on demand.
+    static var appSupport: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Power", isDirectory: true)
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base
+    }
+
+    /// Relay's config file, written by RelayStore and read by the server.
+    static var relayConfigPath: URL {
+        appSupport.appendingPathComponent("relay.config.json")
     }
 }
 

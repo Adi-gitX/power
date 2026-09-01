@@ -7,7 +7,7 @@ struct ContentView: View {
     @AppStorage("power.onboarded") private var hasOnboarded = false
     @StateObject private var engine = RunEngine()
     @StateObject private var devServer = DevServerManager()
-    @StateObject private var omni = OmniRouteManager()
+    @StateObject private var omni = RelayManager()
     @State private var auth: ClaudeAuth.Status?
     @State private var signingIn = false
     @State private var currentView: MainView = .home
@@ -833,27 +833,29 @@ struct ContentView: View {
     enum CostMode: String, CaseIterable { case paid = "Paid", mixed = "Mixed", free = "Free" }
 
     private var costMode: CostMode {
-        guard let omni = providers.first(where: { $0.id == omniRouteProviderID }),
+        guard let omni = providers.first(where: { $0.id == relayProviderID }),
               !omni.allowRoles.isEmpty else { return .paid }
         return omni.allowRoles.count >= Role.allCases.count ? .free : .mixed
     }
 
     /// Apply a money choice by (re)configuring the managed OmniRoute provider,
     /// preserving the token and compression the user already set. Choosing a
-    /// routed mode while OmniRoute isn't up opens Routing so it can be set up.
+    /// routed mode while Relay isn't up ensures it starts (or opens Routing).
     private func setCostMode(_ mode: CostMode) {
-        let existing = providers.first { $0.id == omniRouteProviderID }
-        let token = existing?.authToken
-        let compress = existing?.compression ?? "stacked"
-        providers.removeAll { $0.id == omniRouteProviderID }
+        providers.removeAll { $0.id == relayProviderID }
         switch mode {
         case .paid: break
-        case .mixed: providers.append(.omniRoute(maxFree: false, authToken: token, compression: compress))
-        case .free: providers.append(.omniRoute(maxFree: true, authToken: token, compression: compress))
+        case .mixed: providers.append(.relay(maxFree: false))
+        case .free: providers.append(.relay(maxFree: true))
         }
         ProviderStore.save(providers)
         if mode != .paid {
-            Task { if !(await omni.ping()) { showRouting = true } }
+            Task {
+                if !(await omni.ping()) {
+                    // Relay is bundled — just start it; open Routing only on failure.
+                    if !(await omni.start()) { showRouting = true }
+                }
+            }
         }
     }
 
@@ -880,7 +882,7 @@ struct ContentView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.hairline))
-        .help("Paid: your Claude login. Mixed: free research + docs, paid Claude for code. Free: everything free via OmniRoute, falling back to Claude if it's down.")
+        .help("Paid: your Claude login. Mixed: cheap research + docs via Relay, paid Claude for code. Free: everything through Relay, falling back to Claude if it's down.")
     }
 
     /// The routing affordance: opens the provider sheet. Shows a count when the
@@ -902,7 +904,7 @@ struct ContentView: View {
         .padding(.horizontal, 10).padding(.vertical, 5)
         .background(Capsule().fill(routed ? Color.accentSoft.opacity(0.1) : .clear))
         .overlay(Capsule().stroke(routed ? Color.accentSoft.opacity(0.5) : Color.hairline))
-        .help("Route stages to a cheaper provider or a local gateway (OmniRoute)")
+        .help("Manage Relay — Power's built-in router — and the providers it routes to")
     }
 
     private func toggleChip(_ label: String, _ path: WritableKeyPath<RunFeatures, Bool>) -> some View {
@@ -951,12 +953,12 @@ struct ContentView: View {
         }
         // If a run will route to OmniRoute, make sure it is up before the first
         // dispatch hits a dead endpoint — otherwise start immediately.
-        let usesOmni = providers.contains { $0.id == omniRouteProviderID && !$0.allowRoles.isEmpty }
+        let usesOmni = providers.contains { $0.id == relayProviderID && !$0.allowRoles.isEmpty }
         if usesOmni {
             Task {
                 let up = await omni.ensureRunning()
                 if !up {
-                    engine.errorText = "OmniRoute routing is on but it isn't running — open Routing to install or start it."
+                    engine.errorText = "Relay routing is on but it wouldn't start — open Routing to check its providers."
                     return
                 }
                 engine.start(goal: activeGoal, repoDir: dir, features: features)
@@ -2530,10 +2532,11 @@ struct SidebarButtonStyle: ButtonStyle {
 /// control.
 struct RoutingSheet: View {
     @Binding var providers: [Provider]
-    @ObservedObject var omni: OmniRouteManager
+    @ObservedObject var omni: RelayManager
     @Environment(\.dismiss) private var dismiss
-    @State private var detecting = false
-    @State private var detectResult: String?
+    /// Relay's upstream providers (bring-your-own keys) and its compression mode.
+    @State private var upstreams: [RelayUpstream] = RelayStore.loadUpstreams()
+    @State private var compression: String = RelayStore.compression
 
     /// The roles offered as a quality floor, low-stakes first. Code-writing and
     /// gate-graded roles are last and off by default — the guardrail is visible.
@@ -2548,10 +2551,10 @@ struct RoutingSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     intro
-                    omniRouteCard
+                    relayCard
                     claudeCard
                     ForEach($providers) { $p in
-                        if p.kind == .gateway, p.id != omniRouteProviderID {
+                        if p.kind == .gateway, p.id != relayProviderID {
                             gatewayCard($p)
                         }
                     }
@@ -2565,65 +2568,29 @@ struct RoutingSheet: View {
         .task { await omni.refresh() }
     }
 
-    // MARK: OmniRoute — the managed gateway
+    // MARK: Relay — Power's own router
 
-    private var omniBinding: Binding<Provider>? {
-        guard let i = providers.firstIndex(where: { $0.id == omniRouteProviderID }) else { return nil }
-        return $providers[i]
+    private var relayEnabled: Bool {
+        providers.contains { $0.id == relayProviderID && !$0.allowRoles.isEmpty }
     }
-    private var omniEnabled: Bool {
-        providers.contains { $0.id == omniRouteProviderID && !$0.allowRoles.isEmpty }
-    }
-    private var omniMaxFree: Bool {
-        (providers.first { $0.id == omniRouteProviderID }?.allowRoles.count ?? 0) >= Role.allCases.count
-    }
-    private var omniCompression: String {
-        providers.first { $0.id == omniRouteProviderID }?.compression ?? "stacked"
+    private var relayMaxFree: Bool {
+        (providers.first { $0.id == relayProviderID }?.allowRoles.count ?? 0) >= Role.allCases.count
     }
 
-    /// Show the install log while installing and after a failure.
-    private var omniShowLog: Bool {
-        guard !omni.installLog.isEmpty else { return false }
-        if omni.state == .installing { return true }
-        if case .error = omni.state { return true }
-        return false
-    }
-
-    private var omniRouteCard: some View {
+    private var relayCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "bolt.horizontal.circle.fill").foregroundStyle(Color.accentSoft)
-                Text("OmniRoute").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.ink)
-                omniStatusPill
+                Text("Relay").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.ink)
+                relayStatusPill
                 Spacer()
-                if omni.state == .running {
-                    Button("Dashboard") { omni.openDashboard() }
-                        .buttonStyle(.plain).font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(Color.accentSoft)
-                }
             }
 
-            Text("A local gateway to 350+ providers — 90+ with free tiers. Power installs and runs it for you; you bring your own accounts through its dashboard. Free routing works keyless out of the box via its `auto` model.")
+            Text("Power's own router, built in. It sends stages to the providers you add below (any OpenAI-compatible endpoint — Groq, OpenRouter, DeepSeek, Together, Gemini, a local Ollama…). Nothing to install — Relay ships inside the app.")
                 .font(.system(size: 11.5)).foregroundStyle(Color.mutedText)
                 .fixedSize(horizontal: false, vertical: true)
 
-            omniActions
-
-            // Show the log while installing AND after a failure — "see the log"
-            // has to actually show it.
-            if omniShowLog {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 1) {
-                        ForEach(Array(omni.installLog.suffix(8).enumerated()), id: \.offset) { _, l in
-                            Text(l).font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(Color.mutedText).lineLimit(1)
-                        }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(height: 88)
-                .padding(8)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.raised))
-            }
+            relayActions
 
             if case .error(let msg) = omni.state {
                 Text(msg).font(.system(size: 11)).foregroundStyle(Color.orange)
@@ -2632,77 +2599,124 @@ struct RoutingSheet: View {
 
             Divider().overlay(Color.hairline)
 
-            // The routing switches — only meaningful once installed.
             Toggle(isOn: Binding(
-                get: { omniEnabled },
-                set: { on in setOmni(enabled: on, maxFree: omniMaxFree) }
+                get: { relayEnabled },
+                set: { on in setRelayMode(enabled: on, maxFree: relayMaxFree) }
             )) {
-                Text("Route through OmniRoute").font(.system(size: 12.5, weight: .medium))
+                Text("Route through Relay").font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(Color.ink)
             }
             .toggleStyle(.switch).tint(Color.accent)
 
-            if omniEnabled {
+            if relayEnabled {
                 Toggle(isOn: Binding(
-                    get: { omniMaxFree },
-                    set: { max in setOmni(enabled: true, maxFree: max) }
+                    get: { relayMaxFree },
+                    set: { max in setRelayMode(enabled: true, maxFree: max) }
                 )) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Maximum free — route every role").font(.system(size: 12.5, weight: .medium))
+                        Text("Maximum — route every role").font(.system(size: 12.5, weight: .medium))
                             .foregroundStyle(Color.ink)
-                        Text("Sends code, review, and verification to free models too. Cheapest possible, but weaker models fail more gates and trigger more retries — quality is the trade.")
+                        Text("Sends code, review, and verification through Relay too. Cheapest, but weaker upstream models fail more gates and trigger more retries — quality is the trade.")
                             .font(.system(size: 10.5)).foregroundStyle(Color.mutedText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .toggleStyle(.switch).tint(Color.orange)
 
-                Text(omniMaxFree
-                     ? "Every role → OmniRoute. Your Claude login is used only if it's down."
-                     : "Research + docs → OmniRoute. Code and gate-graded roles stay on your Claude login.")
+                Text(relayMaxFree
+                     ? "Every role → Relay. Your Claude login is used only if Relay is down."
+                     : "Research + docs → Relay. Code and gate-graded roles stay on your Claude login.")
                     .font(.system(size: 10.5)).foregroundStyle(Color.mutedText)
-
-                Divider().overlay(Color.hairline)
-
-                // Compression — OmniRoute trims the request before the upstream
-                // model. Safe: it compresses noisy tool output, not code, and is
-                // cache-aware so it never breaks warm-session reuse.
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Compression — fewer tokens per request")
-                        .font(.system(size: 12.5, weight: .medium)).foregroundStyle(Color.ink)
-                    HStack(spacing: 0) {
-                        ForEach([("Off", "off"), ("Standard", "standard"), ("Max", "stacked")], id: \.1) { pair in
-                            let on = omniCompression == pair.1
-                            Button(pair.0) { setOmni(enabled: true, maxFree: omniMaxFree, compression: pair.1) }
-                                .buttonStyle(.plain)
-                                .font(.system(size: 11.5, weight: on ? .semibold : .medium))
-                                .foregroundStyle(on ? Color.ink : Color.mutedText)
-                                .padding(.horizontal, 12).padding(.vertical, 5)
-                                .background(RoundedRectangle(cornerRadius: 6).fill(on ? Color.raised : .clear))
-                        }
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.hairline))
-                    Text(omniCompression == "stacked"
-                         ? "Max: RTK→Caveman, up to ~89% off tool output. Best savings."
-                         : omniCompression == "standard"
-                         ? "Standard: filler removal, ~30% off. Conservative."
-                         : "Off: requests sent whole.")
-                        .font(.system(size: 10.5)).foregroundStyle(Color.mutedText)
-                }
             }
+
+            Divider().overlay(Color.hairline)
+
+            // Compression — Relay trims noisy tool output before the upstream.
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Compression — fewer tokens per request")
+                    .font(.system(size: 12.5, weight: .medium)).foregroundStyle(Color.ink)
+                HStack(spacing: 0) {
+                    ForEach([("Off", "off"), ("Safe", "safe"), ("Max", "max")], id: \.1) { pair in
+                        let on = compression == pair.1
+                        Button(pair.0) {
+                            compression = pair.1; RelayStore.compression = pair.1
+                            Task { await omni.reloadConfig() }
+                        }
+                        .buttonStyle(.plain).lineLimit(1).fixedSize()
+                        .font(.system(size: 11.5, weight: on ? .semibold : .medium))
+                        .foregroundStyle(on ? Color.ink : Color.mutedText)
+                        .padding(.horizontal, 12).padding(.vertical, 5)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(on ? Color.raised : .clear))
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.hairline))
+                Text(compression == "max"
+                     ? "Max: trims oversized tool output harder. Best savings."
+                     : compression == "safe"
+                     ? "Safe: trims only very large tool output. Conservative."
+                     : "Off: requests sent whole.")
+                    .font(.system(size: 10.5)).foregroundStyle(Color.mutedText)
+            }
+
+            Divider().overlay(Color.hairline)
+
+            // Upstream providers — bring your own keys.
+            Text("Providers Relay routes to").font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(Color.ink)
+            if upstreams.isEmpty {
+                Text("None yet — add one (an OpenAI-compatible base URL + key) for Relay to route to.")
+                    .font(.system(size: 11)).foregroundStyle(Color.mutedText)
+            }
+            ForEach($upstreams) { $up in upstreamCard($up) }
+            Button {
+                upstreams.append(RelayUpstream(
+                    id: "up-\(UUID().uuidString.prefix(8))", name: "New provider",
+                    kind: "openai", baseUrl: "", apiKey: "",
+                    models: ["default": "", "coding": "", "cheap": ""]
+                ))
+            } label: {
+                HStack(spacing: 5) { Image(systemName: "plus"); Text("Add provider") }
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .buttonStyle(.plain).foregroundStyle(Color.accentSoft)
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.panel))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(omniEnabled ? Color.accentSoft.opacity(0.4) : Color.hairline))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(relayEnabled ? Color.accentSoft.opacity(0.4) : Color.hairline))
     }
 
-    private var omniStatusPill: some View {
+    private func upstreamCard(_ up: Binding<RelayUpstream>) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                TextField("Name", text: up.name)
+                    .textFieldStyle(.plain).font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(Color.ink)
+                Spacer()
+                Button { upstreams.removeAll { $0.id == up.wrappedValue.id } } label: {
+                    Image(systemName: "trash").font(.system(size: 11))
+                }.buttonStyle(.plain).foregroundStyle(Color.mutedText)
+            }
+            field("Base URL (OpenAI-compatible, ends in /v1)", text: up.baseUrl, placeholder: "https://api.groq.com/openai/v1")
+            field("API key", text: up.apiKey, placeholder: "sk-…", secure: true)
+            field("Model — default", text: Binding(
+                get: { up.wrappedValue.models["default"] ?? "" },
+                set: { up.wrappedValue.models["default"] = $0 }
+            ), placeholder: "llama-3.1-8b-instant")
+            field("Model — coding", text: Binding(
+                get: { up.wrappedValue.models["coding"] ?? "" },
+                set: { up.wrappedValue.models["coding"] = $0 }
+            ), placeholder: "llama-3.3-70b-versatile")
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.raised.opacity(0.5)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.hairline))
+    }
+
+    private var relayStatusPill: some View {
         let (text, color): (String, Color) = switch omni.state {
         case .checking: ("checking…", Color.mutedText)
-        case .notInstalled: ("not installed", Color.mutedText)
         case .stopped: ("stopped", Color.mutedText)
-        case .installing: ("installing…", Color.accentSoft)
         case .starting: ("starting…", Color.accentSoft)
         case .running: ("running", Color.green)
         case .error: ("error", Color.orange)
@@ -2713,17 +2727,15 @@ struct RoutingSheet: View {
             .background(Capsule().fill(color.opacity(0.12)))
     }
 
-    @ViewBuilder private var omniActions: some View {
+    @ViewBuilder private var relayActions: some View {
         HStack(spacing: 10) {
             switch omni.state {
-            case .notInstalled:
-                actionButton("Install OmniRoute", "arrow.down.circle") { Task { await omni.install() } }
             case .stopped, .error:
-                actionButton("Start", "play.fill") { Task { await omni.start() } }
+                actionButton("Start Relay", "play.fill") { Task { await omni.start() } }
                 actionButton("Re-check", "arrow.clockwise", subtle: true) { Task { await omni.refresh() } }
             case .running:
                 actionButton("Stop", "stop.fill", subtle: true) { omni.stop() }
-            case .checking, .installing, .starting:
+            case .checking, .starting:
                 ProgressView().controlSize(.small)
             }
             Spacer()
@@ -2741,15 +2753,10 @@ struct RoutingSheet: View {
         .foregroundStyle(subtle ? Color.mutedText : Color.accentSoft)
     }
 
-    /// Add, widen, or remove the managed OmniRoute provider in one place.
-    private func setOmni(enabled: Bool, maxFree: Bool, compression: String? = nil) {
-        let existing = providers.first { $0.id == omniRouteProviderID }
-        let token = existing?.authToken
-        let compress = compression ?? existing?.compression ?? "stacked"
-        providers.removeAll { $0.id == omniRouteProviderID }
-        if enabled {
-            providers.append(.omniRoute(maxFree: maxFree, authToken: token, compression: compress))
-        }
+    /// Add, widen, or remove the Relay provider in the routing set.
+    private func setRelayMode(enabled: Bool, maxFree: Bool) {
+        providers.removeAll { $0.id == relayProviderID }
+        if enabled { providers.append(.relay(maxFree: maxFree)) }
         ProviderStore.save(providers)
     }
 
@@ -2766,7 +2773,7 @@ struct RoutingSheet: View {
     }
 
     private var intro: some View {
-        Text("Send stages to a cheaper provider or your own local gateway (like OmniRoute on :20128). Power keeps every code-writing and gate-graded role on your trusted Claude login unless you widen the floor yourself — so cost drops where it is safe, and the gates it must pass stay honest.")
+        Text("Route stages through Relay — Power's built-in router — to the providers you bring. Power keeps every code-writing and gate-graded role on your trusted Claude login unless you widen the floor yourself, so cost drops where it is safe and the gates it must pass stay honest.")
             .font(.system(size: 12)).foregroundStyle(Color.mutedText)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -2803,14 +2810,14 @@ struct RoutingSheet: View {
                 }
                 .buttonStyle(.plain).foregroundStyle(Color.mutedText)
             }
-            field("Base URL", text: Binding(
+            field("Base URL (Anthropic-compatible)", text: Binding(
                 get: { p.wrappedValue.baseUrl ?? "" },
                 set: { p.wrappedValue.baseUrl = $0 }
-            ), placeholder: omniRouteDefaultBase)
+            ), placeholder: "https://your-gateway")
             field("Auth token (optional)", text: Binding(
                 get: { p.wrappedValue.authToken ?? "" },
                 set: { p.wrappedValue.authToken = $0.isEmpty ? nil : $0 }
-            ), placeholder: "from the gateway dashboard", secure: true)
+            ), placeholder: "gateway token", secure: true)
 
             Text("Trusted with these roles").font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Color.mutedText)
@@ -2835,21 +2842,12 @@ struct RoutingSheet: View {
         }
     }
 
+    /// The secondary path: connect an EXTERNAL Anthropic-compatible gateway you
+    /// run yourself (a remote instance, another proxy), separate from Relay.
     private var addRow: some View {
         HStack(spacing: 10) {
-            Button {
-                Task { await detect() }
-            } label: {
-                HStack(spacing: 5) {
-                    if detecting { ProgressView().controlSize(.small) }
-                    else { Image(systemName: "dot.radiowaves.left.and.right") }
-                    Text("Detect local gateway")
-                }
-                .font(.system(size: 12, weight: .medium))
-            }
-            .buttonStyle(.plain).foregroundStyle(Color.accentSoft)
-            .disabled(detecting)
-
+            Text("Advanced: connect an external gateway").font(.system(size: 11))
+                .foregroundStyle(Color.mutedText)
             Button {
                 addCustom()
             } label: {
@@ -2859,34 +2857,8 @@ struct RoutingSheet: View {
                 }
                 .font(.system(size: 12, weight: .medium))
             }
-            .buttonStyle(.plain).foregroundStyle(Color.mutedText)
-
+            .buttonStyle(.plain).foregroundStyle(Color.accentSoft)
             Spacer()
-            if let detectResult {
-                Text(detectResult).font(.system(size: 11)).foregroundStyle(Color.mutedText)
-            }
-        }
-    }
-
-    private func detect() async {
-        detecting = true; detectResult = nil
-        let found = await ProviderStore.detect()
-        detecting = false
-        if found {
-            if !providers.contains(where: { $0.baseUrl.map(ProviderRouter.normalizeBaseUrl) == ProviderRouter.normalizeBaseUrl(omniRouteDefaultBase) }) {
-                providers.append(Provider(
-                    id: "omniroute-\(UUID().uuidString.prefix(8))",
-                    label: "OmniRoute (local)", kind: .gateway,
-                    baseUrl: omniRouteDefaultBase, authToken: nil,
-                    allowRoles: safeCheapRoles, costWeight: 0, models: nil
-                ))
-                detectResult = "Found — added, trusted with research + docs"
-            } else {
-                detectResult = "Already configured"
-            }
-            save()
-        } else {
-            detectResult = "Nothing on \(omniRouteDefaultBase)"
         }
     }
 
@@ -2900,10 +2872,15 @@ struct RoutingSheet: View {
     }
 
     private func save() {
-        // Drop half-configured gateways (no base URL) so a router never points
-        // at nothing.
+        // Drop half-configured external gateways (no base URL) so a router never
+        // points at nothing. The Relay provider has a base URL by construction.
         providers = providers.filter { $0.kind != .gateway || !($0.baseUrl ?? "").isEmpty }
         ProviderStore.save(providers)
+        // Persist Relay's upstreams + compression and reload the running server.
+        upstreams = upstreams.filter { !$0.baseUrl.isEmpty }
+        RelayStore.saveUpstreams(upstreams)
+        RelayStore.compression = compression
+        Task { await omni.reloadConfig() }
     }
 }
 
