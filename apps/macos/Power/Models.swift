@@ -17,6 +17,23 @@ struct RunFeatures: Codable, Equatable {
     var autoApprove = false
     var packs = false
 
+    /// The speed lever, mirroring the TS engine's `expressFeatures`. A small
+    /// prompt should not pay for a seven-stage pipeline — each stage is a
+    /// separate cold `claude` round-trip. So the default `auto` tier, on a
+    /// simple goal, runs EXPRESS: spec → implement → verify, auto-approved (3
+    /// calls, no human pause), dropping research/review/test/docs. Verify (the
+    /// deploy gate) always survives. An explicit tier is honoured verbatim; a
+    /// complex goal keeps the full pipeline even on auto.
+    func express(for goal: String) -> RunFeatures {
+        guard tier == .auto, !ModelPolicy.isComplex(goal) else { return self }
+        var f = self
+        f.research = false
+        f.reviewTest = false
+        f.docs = false
+        f.autoApprove = true
+        return f
+    }
+
     /// What a run is NOT doing — a cheap run must look cheap in the header.
     var offSummary: String {
         var parts: [String] = []

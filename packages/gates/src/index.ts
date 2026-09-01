@@ -28,6 +28,23 @@ const validators = {
   verification: compile('verification.schema.json'),
 };
 
+/** Resolve the value Ajv's `instancePath` points at, so an error can quote what
+ * the model actually wrote — the difference between a retry that converges and
+ * one that guesses again at the same broken value. */
+function valueAt(data: unknown, instancePath: string): unknown {
+  if (!instancePath) return undefined;
+  const parts = instancePath
+    .split('/')
+    .slice(1)
+    .map((p) => p.replace(/~1/g, '/').replace(/~0/g, '~'));
+  let cur: unknown = data;
+  for (const p of parts) {
+    if (cur == null || typeof cur !== 'object') return undefined;
+    cur = (cur as Record<string, unknown>)[p];
+  }
+  return cur;
+}
+
 /** Turn Ajv output into gate errors that name the artifact and the offending path. */
 function schemaErrors(
   artifact: string,
@@ -35,16 +52,23 @@ function schemaErrors(
   data: unknown,
 ): GateError[] {
   if (validate(data)) return [];
-  return (validate.errors ?? []).map((error) => ({
-    artifact,
-    field: error.instancePath === '' ? '(root)' : error.instancePath.replace(/^\//, ''),
-    rule: `schema.${error.keyword}`,
-    detail: `${error.message ?? 'failed schema validation'}${
-      error.params && Object.keys(error.params).length > 0
-        ? ` (${JSON.stringify(error.params)})`
-        : ''
-    }`,
-  }));
+  return (validate.errors ?? []).map((error) => {
+    const params =
+      error.params && Object.keys(error.params).length > 0 ? ` (${JSON.stringify(error.params)})` : '';
+    // Quote the actual offending value for scalar leaves — a pattern/enum/type
+    // failure is only fixable if the retry can see what it wrote.
+    const found = valueAt(data, error.instancePath);
+    const shown =
+      found !== undefined && (typeof found !== 'object' || found === null)
+        ? ` — found ${JSON.stringify(found)}`
+        : '';
+    return {
+      artifact,
+      field: error.instancePath === '' ? '(root)' : error.instancePath.replace(/^\//, ''),
+      rule: `schema.${error.keyword}`,
+      detail: `${error.message ?? 'failed schema validation'}${params}${shown}`,
+    };
+  });
 }
 
 function parseJson(artifact: string, raw: string): { data: unknown } | { error: GateError } {

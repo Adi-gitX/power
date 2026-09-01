@@ -32,6 +32,29 @@ describe('golden artifacts pass', () => {
   });
 });
 
+describe('a schema failure quotes the offending value so a retry can converge', () => {
+  it('shows what the model actually wrote for a bad requirement_id', () => {
+    const bad = [
+      '---',
+      'product: Test',
+      'primary_persona: Developer',
+      'requirement_ids: [R1, "16"]',
+      'approved: false',
+      '---',
+      '',
+      '## Requirements',
+      '',
+      '(R1) something',
+    ].join('\n');
+    const result = runGate('spec', { 'SPEC.md': bad });
+    expect(result.pass).toBe(false);
+    const patternErr = result.errors.find((e) => e.rule === 'schema.pattern');
+    expect(patternErr, 'a pattern error should be reported').toBeDefined();
+    // The detail must name the value, not just the path + pattern.
+    expect(patternErr!.detail).toContain('found "16"');
+  });
+});
+
 describe('a missing artifact fails rather than passing vacuously', () => {
   it.each(['research', 'spec', 'verification'] as const)('%s', (stage) => {
     const result = runGate(stage, {});

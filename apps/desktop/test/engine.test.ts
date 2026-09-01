@@ -4,7 +4,18 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PowerRun, claudeArgs, parseStreamLine } from '../src/main/engine/runner.js';
-import type { RunEvent } from '../src/main/engine/types.js';
+import type { RunEvent, RunFeatures } from '../src/main/engine/types.js';
+
+/** The full pipeline — an explicit tier so express (auto + simple goal) doesn't
+ * collapse the stages these tests are asserting. */
+const FULL: RunFeatures = {
+  tier: 'balanced',
+  research: true,
+  reviewTest: true,
+  docs: true,
+  autoApprove: false,
+  packs: false,
+};
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const POWER_ROOT = resolve(HERE, '..', '..', '..');
@@ -40,6 +51,7 @@ describe('the desktop engine drives the full pipeline', () => {
         repoDir,
         goal: 'a CLI that converts CSV to JSON, with tests',
         powerRoot: POWER_ROOT,
+      features: FULL,
         agentCommand: (role) => ({ cmd: 'node', args: [MOCK, role, repoDir, FIXTURES] }),
       });
       run.on('event', (e: RunEvent) => {
@@ -69,6 +81,44 @@ describe('the desktop engine drives the full pipeline', () => {
   );
 
   it(
+    'express: a simple goal on auto runs spec→implement→verify only, auto-approved',
+    { timeout: 120_000 },
+    async () => {
+      const repoDir = scratchRepo();
+      const events: RunEvent[] = [];
+      const roles: string[] = [];
+      const run = new PowerRun({
+        repoDir,
+        goal: 'a small html page saying hello', // simple → express (no features = auto)
+        powerRoot: POWER_ROOT,
+        agentCommand: (role) => {
+          roles.push(role);
+          return { cmd: 'node', args: [MOCK, role, repoDir, FIXTURES] };
+        },
+      });
+      run.on('event', (e: RunEvent) => {
+        events.push(e);
+        if (e.type === 'needs_approval') run.approve();
+      });
+
+      await run.run();
+
+      expect(events.some((e) => e.type === 'done')).toBe(true);
+      // No human pause and none of the slow ceremony stages ran.
+      expect(events.some((e) => e.type === 'needs_approval')).toBe(false);
+      expect(roles).not.toContain('researcher');
+      expect(roles).not.toContain('reviewer');
+      expect(roles).not.toContain('tester');
+      expect(roles).not.toContain('documenter');
+      // The three that DO run — and verify is never skipped (the deploy gate).
+      expect(roles).toEqual(expect.arrayContaining(['architect', 'implementer', 'verifier']));
+      const gates = events.filter((e) => e.type === 'gate').map((g) => (g.type === 'gate' ? g.stage : ''));
+      expect(gates).toContain('verification');
+      expect(gates).not.toContain('research');
+    },
+  );
+
+  it(
     'blocks after the retry budget when an agent cannot satisfy its gate',
     { timeout: 120_000 },
     async () => {
@@ -79,6 +129,7 @@ describe('the desktop engine drives the full pipeline', () => {
         repoDir,
         goal: 'a run whose research can never pass',
         powerRoot: POWER_ROOT,
+      features: FULL,
         // The researcher always writes the broken fixture set.
         agentCommand: (role) => ({ cmd: 'node', args: [MOCK, role, repoDir, FIXTURES, 'broken'] }),
       });
@@ -110,6 +161,7 @@ describe('the desktop engine drives the full pipeline', () => {
       repoDir,
       goal: 'observe retry briefs',
       powerRoot: POWER_ROOT,
+      features: FULL,
       agentCommand: (role, dispatch) => {
         dispatches.push(dispatch);
         return { cmd: 'node', args: [MOCK, role, repoDir, FIXTURES, 'broken'] };
@@ -144,6 +196,7 @@ describe('run options', () => {
         repoDir,
         goal: 'cheapest possible honest run',
         powerRoot: POWER_ROOT,
+      features: FULL,
         features: {
           tier: 'eco',
           research: false,
@@ -238,6 +291,19 @@ describe('efficiency contract', () => {
     expect(Number(args[args.indexOf('--max-turns') + 1])).toBeLessThanOrEqual(10);
   });
 
+  it('express only collapses auto + a simple goal; other tiers and complex goals are untouched', async () => {
+    const { expressFeatures } = await import('../src/main/engine/runner.js');
+    const auto: RunFeatures = { tier: 'auto', research: true, reviewTest: true, docs: true, autoApprove: false, packs: false };
+    // simple goal on auto → express
+    const e = expressFeatures(auto, 'a small html page');
+    expect(e).toMatchObject({ research: false, reviewTest: false, docs: false, autoApprove: true });
+    // complex goal on auto → full pipeline
+    expect(expressFeatures(auto, 'a dashboard with auth and a database')).toEqual(auto);
+    // explicit tier → verbatim, even for a simple goal
+    const balanced: RunFeatures = { ...auto, tier: 'balanced' };
+    expect(expressFeatures(balanced, 'a small html page')).toEqual(balanced);
+  });
+
   it('captures session ids from both frame shapes', () => {
     expect(parseStreamLine('{"type":"system","subtype":"init","session_id":"abc"}'))
       .toEqual({ kind: 'session', sessionId: 'abc' });
@@ -262,6 +328,7 @@ describe('the never-stops guarantee (provider fallback)', () => {
         repoDir,
         goal: 'a CLI that converts CSV to JSON, with tests',
         powerRoot: POWER_ROOT,
+      features: FULL,
         // A gateway trusted with every role — the "maximum free" shape.
         providers: [
           {

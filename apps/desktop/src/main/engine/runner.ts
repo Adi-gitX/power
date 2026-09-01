@@ -60,6 +60,21 @@ export function goalIsComplex(goal: string): boolean {
   return goal.length > 90 || COMPLEXITY_MARKERS.some((m) => lower.includes(m));
 }
 
+/**
+ * The speed lever. A small prompt should not pay for a seven-stage pipeline —
+ * each stage is a separate cold `claude` round-trip, and research/review/test/
+ * docs are the slowest of them. So the default `auto` tier, faced with a simple
+ * goal, runs an EXPRESS pipeline: spec → implement → verify, auto-approved. That
+ * is 3 model calls instead of 7, and it drops the slowest stages, while keeping
+ * verify (the deploy gate, the product's promise). Any explicit tier
+ * (eco/balanced/max) is honoured verbatim — express is only auto's judgement,
+ * and a complex goal keeps the full pipeline even on auto.
+ */
+export function expressFeatures(f: RunFeatures, goal = ''): RunFeatures {
+  if (f.tier !== 'auto' || goalIsComplex(goal)) return f;
+  return { ...f, research: false, reviewTest: false, docs: false, autoApprove: true };
+}
+
 const ROLE_MODEL: Record<string, string> = {
   researcher: 'sonnet',
   architect: 'opus',
@@ -202,7 +217,7 @@ export class PowerRun extends EventEmitter {
 
   constructor(private readonly opts: EngineOptions) {
     super();
-    this.features = opts.features ?? DEFAULT_FEATURES;
+    this.features = expressFeatures(opts.features ?? DEFAULT_FEATURES, opts.goal);
     this.providers = opts.providers ?? [];
   }
 

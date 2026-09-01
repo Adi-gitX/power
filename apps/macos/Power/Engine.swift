@@ -132,7 +132,8 @@ final class RunEngine: ObservableObject {
         self.powerRoot = root
         self.goal = goal
         self.repoDir = repoDir
-        self.features = features
+        // Express: a simple goal on auto skips the slow ceremony stages.
+        self.features = features.express(for: goal)
         self.providers = ProviderStore.load()
 
         // A continuation archives the finished run's state file — the reducer
