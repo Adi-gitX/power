@@ -32,6 +32,7 @@ plugin:
     - identity
     - coverage_first
     - defect_versus_preference
+    - security_audit
     - review_json_schema
     - workflow
     - never_do

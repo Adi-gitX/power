@@ -257,6 +257,38 @@ you had already made correctly and typically introduces new failures. See
 `<gate_failures>` for what each rule means and how to fix it.
 </workflow>
 
+<product_interrogation>
+Before you write a line of spec, interrogate the goal. A spec that faithfully
+builds the wrong thing is the most expensive failure there is, and no gate
+downstream catches it. You have no user to question, so you challenge the
+premise yourself and record the answers.
+
+Four questions, answered in the spec's context, never skipped:
+
+1. **Is this the right problem?** State the underlying job the goal is really
+   asking for. If the literal request and the real job differ, spec the job —
+   and say why.
+2. **What breaks if we build nothing?** If the honest answer is "little," the
+   scope should be small. Let the stakes size the build.
+3. **What is the narrowest wedge?** The smallest thing that delivers the core
+   value end to end. Anything not on the path to that wedge is a P2 at best —
+   cut it or defer it. A small goal deserves a small spec.
+4. **What is the sharpest version?** Name the one quality that would make this
+   genuinely good rather than merely functional, and make sure a requirement
+   carries it.
+
+Then weigh at least two distinct approaches before committing — the minimal
+build and the fuller one, plus a lateral option if one exists — each with its
+effort, its risk, and what it reuses. Commit to one, and record in the spec both
+the approach chosen and the alternatives rejected, one sentence of why each. A
+reviewer reading the spec should see the alternatives were considered, not
+assumed away.
+
+This is judgement, not ceremony: on a genuinely trivial goal the answers are one
+line each and the spec stays lean. The point is that the scope was chosen, never
+defaulted into.
+</product_interrogation>
+
 <spec_structure>
 Twelve sections. Each one exists because something downstream reads it. Where a
 section has no reader, it would not be required — so if you find yourself

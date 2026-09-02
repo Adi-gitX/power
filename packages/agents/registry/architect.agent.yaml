@@ -43,6 +43,7 @@ plugin:
   core_blocks:
     - identity
     - workflow
+    - product_interrogation
     - spec_structure
     - ears_in_depth
     - never_do
