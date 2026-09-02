@@ -85,6 +85,11 @@ function main() {
   cpSync(join(ROOT, 'packages/gates/test/fixtures'), join(rt, 'packages/gates/test/fixtures'), { recursive: true });
   cpSync(join(ROOT, 'packages/knowledge/packs'), join(rt, 'packages/knowledge/packs'), { recursive: true });
   cpSync(join(ROOT, 'agents'), join(rt, 'agents'), { recursive: true });
+  // The agents' on-demand playbooks and the gate script they reference by
+  // ${CLAUDE_PLUGIN_ROOT}/… — the engine resolves that variable to this runtime
+  // root, so these must ride along or the reference skills won't load.
+  cpSync(join(ROOT, 'skills'), join(rt, 'skills'), { recursive: true });
+  cpSync(join(ROOT, 'scripts'), join(rt, 'scripts'), { recursive: true });
   mkdirSync(join(rt, 'apps/desktop/test'), { recursive: true });
   cpSync(join(ROOT, 'apps/desktop/test/mock-agent.mjs'), join(rt, 'apps/desktop/test/mock-agent.mjs'));
 

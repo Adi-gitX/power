@@ -308,6 +308,14 @@ export class PowerRun extends EventEmitter {
   /** Dispatch one specialist, exactly as jobs/build.md specifies a dispatch. */
   private async dispatch(role: Role, briefLines: string[], resume?: string): Promise<void> {
     const promptPath = join(this.opts.powerRoot, 'agents', `${role}.md`);
+    // Agent prompts point at their on-demand playbooks via
+    // ${CLAUDE_PLUGIN_ROOT}/skills/... — set only by Claude Code's plugin host.
+    // We run claude headless, so resolve it to the real runtime root or the
+    // reference skills (and the gate script path) never load. See the twin in
+    // apps/macos/Power/Engine.swift.
+    const systemPrompt = existsSync(promptPath)
+      ? readFileSync(promptPath, 'utf8').split('${CLAUDE_PLUGIN_ROOT}').join(this.opts.powerRoot)
+      : '';
     // Route first: the cheapest provider trusted with this role. The built-in
     // Claude default is always eligible, so a role no cheap provider is trusted
     // with simply stays on Claude — no behaviour change from before providers.
@@ -339,7 +347,7 @@ export class PowerRun extends EventEmitter {
             args: claudeArgs(
               role,
               dispatch,
-              useResume ? '' : readFileSync(promptPath, 'utf8'),
+              useResume ? '' : systemPrompt,
               this.opts.repoDir,
               this.features,
               this.opts.goal,

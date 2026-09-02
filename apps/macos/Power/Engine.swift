@@ -470,7 +470,13 @@ final class RunEngine: ObservableObject {
                 args += ["--resume", resume, "--max-turns", String(max(10, maxTurns(for: role) / 3))]
             } else {
                 let promptURL = powerRoot.appendingPathComponent("agents/\(role.rawValue).md")
+                // The agent prompts reference their on-demand playbooks by
+                // ${CLAUDE_PLUGIN_ROOT}/skills/... — a variable only Claude Code's
+                // plugin host sets. We run claude headless, so we resolve it here
+                // to the real runtime root; without this the reference skills
+                // (and the gate script path) never load in the app.
                 let systemPrompt = try String(contentsOf: promptURL, encoding: .utf8)
+                    .replacingOccurrences(of: "${CLAUDE_PLUGIN_ROOT}", with: powerRoot.path)
                 args += ["--append-system-prompt", systemPrompt, "--max-turns", String(maxTurns(for: role))]
             }
             let resolvedModel = provider.models?[role] ?? model(for: role)
